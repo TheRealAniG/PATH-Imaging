@@ -1,9 +1,7 @@
-cmake_minimum_required(VERSION 3.16)
+﻿cmake_minimum_required(VERSION 3.16)
 project(path_camera LANGUAGES CXX)
-
 find_package(vizionsdk REQUIRED)
-find_package(OpenCV REQUIRED COMPONENTS core highgui imgproc imgcodecs)
-
+find_package(OpenCV REQUIRED COMPONENTS core highgui imgproc)
 add_executable(path-camera src/main.cpp)
 target_compile_features(path-camera PRIVATE cxx_std_17)
 target_include_directories(path-camera PRIVATE ${OpenCV_INCLUDE_DIRS})

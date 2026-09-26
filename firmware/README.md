@@ -1,15 +1,16 @@
-# TEVS-AR0822 live preview
+﻿# TEVS-AR0822 preview
 
-Minimal C++ preview for the TEVS-AR0822-M-S42-IR-RPI22:
-discover camera 0, open it, choose its first UYVY format (MJPG fallback),
-start streaming, retrieve frames and display them with OpenCV.
-Press **q** or **Esc** to stop and close the camera.
+Uses the [VizionSDK C++ Camera Capture API](https://developer.technexion.com/docs/vision-software/vizionsdk/vizionsdk-api/camera-capture) directly:
 
-On the Raspberry Pi, install the matching TechNexion TEVS driver, configure the
-camera media route, and install the ARM64 VizionSDK development package first.
-Run in a desktop session with OpenCV GUI support.
+`VxDiscoverCameraDevices` -> `VxInitialCameraDevice` -> `VxOpen` ->
+`VxGetFormatList` -> `VxSetFormat` -> `VxStartStreaming` ->
+`VxGetImage` -> `VxStopStreaming` -> `VxClose`.
 
-From the repository root:
+Opens camera 0, selects its first UYVY format, and displays frames with OpenCV.
+Press **q** or **Esc** to quit. Capture errors stop the program.
+
+On the Pi, install the matching TEVS driver and VizionSDK development package,
+configure the camera media route, and run from a desktop session:
 
 ```sh
 sudo apt install build-essential cmake libopencv-dev
@@ -18,11 +19,6 @@ cmake --build build/preview -j2
 ./build/preview/path-camera
 ```
 
-The SDK must expose the CMake target `vizionsdk::VizionSDK`. If installed in a
-custom location, add `-DCMAKE_PREFIX_PATH=/path/to/sdk` when configuring.
-The buffer follows the vendor example's allocation model; `VxGetImage` has no
-capacity argument. UYVY is expected to be tightly packed. MJPG uses a
-width × height × 4 buffer; confirm this is sufficient with your SDK/mode.
-
-Reference: [Camera Capture API](https://developer.technexion.com/docs/vision-software/vizionsdk/vizionsdk-api/camera-capture).
-Real SDK compilation and live preview need validation on the camera-equipped Pi.
+Requires tightly packed UYVY (width * height * 2 bytes). The SDK's `VxGetImage`
+has no buffer-capacity argument; confirm this layout on the target SDK.
+Real SDK compilation and camera preview have not been validated locally.
