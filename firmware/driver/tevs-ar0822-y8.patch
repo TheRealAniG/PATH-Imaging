@@ -1,0 +1,136 @@
+diff --git a/drivers/media/i2c/tevs/tevs_main.c b/drivers/media/i2c/tevs/tevs_main.c
+index 849d8d8..35388bf 100644
+--- a/drivers/media/i2c/tevs/tevs_main.c
++++ b/drivers/media/i2c/tevs/tevs_main.c
+@@ -292,12 +292,19 @@
+ #define TOTAL_MICROSEC_PERSEC				(1000000)
+ 
+ #define TEVS_IMG_FORMAT_UYVY				(0x50)
++#define TEVS_IMG_FORMAT_Y8				(0x52)
++#define TEVS_IMG_FORMAT_RAW8_BYPASS_ISP		(0x80)
+ 
+ #define TEVS_LINK_FREQUENCY_DEFAULT			400000000ull
+ #define TEVS_PIXEL_RATE_DEFAULT				200000000ull
+ 
+ #define to_tevs(d) container_of(d, struct tevs, v4l2_subdev)
+ 
++static bool bypass_isp;
++module_param(bypass_isp, bool, 0644);
++MODULE_PARM_DESC(bypass_isp,
++		 "Y8_1X8 streams sensor RAW8 with the ISP bypassed (experimental)");
++
+ /* regulator supplies */
+ static const char *const tevs_supply_name[] = {
+ 	/* Supplies can be enabled in any order */
+@@ -668,6 +675,21 @@ static int tevs_set_frame_interval(struct v4l2_subdev *sub_dev,
+ 	return 0;
+ }
+ 
++static u16 tevs_img_format(struct tevs *tevs)
++{
++	if (tevs->fmt.code != MEDIA_BUS_FMT_Y8_1X8)
++		return TEVS_IMG_FORMAT_UYVY;
++	return bypass_isp ? TEVS_IMG_FORMAT_RAW8_BYPASS_ISP : TEVS_IMG_FORMAT_Y8;
++}
++
++static u16 tevs_mipi_ctrl(struct tevs *tevs)
++{
++	/* Y8 is sent with CSI-2 data type RAW8 in bits [7:2]. */
++	if (tevs->fmt.code == MEDIA_BUS_FMT_Y8_1X8)
++		return MIPI_CSI2_DT_RAW8 << 2 | tevs->vc_id;
++	return tevs->vc_id;
++}
++
+ static int tevs_start_streaming(struct tevs *tevs)
+ {
+ 	struct i2c_client *client = v4l2_get_subdevdata(&tevs->v4l2_subdev);
+@@ -690,14 +712,14 @@ static int tevs_start_streaming(struct tevs *tevs)
+ 				.res_list[tevs->selected_mode]
+ 				.height, tevs->fps);
+ 		tevs_i2c_write_16b(tevs, HOST_COMMAND_ISP_CTRL_PREVIEW_FORMAT,
+-				   TEVS_IMG_FORMAT_UYVY);
++				   tevs_img_format(tevs));
+ 		tevs_i2c_write_16b(tevs,
+ 				   HOST_COMMAND_ISP_CTRL_PREVIEW_HINF_CTRL,
+ 				   0x10 | (tevs->continuous_clock << 5) |
+ 					   (tevs->data_lanes));
+ 		tevs_i2c_write_16b(tevs,
+ 				   HOST_COMMAND_ISP_CTRL_PREVIEW_MIPI_CTRL,
+-				   tevs->vc_id);
++				   tevs_mipi_ctrl(tevs));
+ 		tevs_i2c_write_16b(tevs,
+ 				   HOST_COMMAND_ISP_CTRL_PREVIEW_SENSOR_MODE,
+ 				   tevs_sensor_table[tevs->selected_sensor]
+@@ -801,7 +823,8 @@ static int tevs_get_frame_desc(struct v4l2_subdev *sub_dev, unsigned int pad,
+ 	fd->entry[0].pixelcode = tevs->fmt.code;
+ 	fd->entry[0].bus.csi2.vc = 0;
+ 	fd->entry[0].bus.csi2.dt =
+-		tevs->fmt.code == MEDIA_BUS_FMT_SGRBG8_1X8 ?
++		tevs->fmt.code == MEDIA_BUS_FMT_SGRBG8_1X8 ||
++		tevs->fmt.code == MEDIA_BUS_FMT_Y8_1X8 ?
+ 			MIPI_CSI2_DT_RAW8 :
+ 		tevs->fmt.code == MEDIA_BUS_FMT_SGRBG10_1X10 ?
+ 			MIPI_CSI2_DT_RAW10 :
+@@ -890,6 +913,16 @@ static int tevs_set_fmt(struct v4l2_subdev *sub_dev,
+ 		return -EINVAL;
+ 	}
+ 	tevs->selected_mode = i;
++
++	for (i = 0; i < tevs_sensor_table[tevs->selected_sensor].code_list_size;
++	     i++) {
++		if (mbus_fmt->code ==
++		    tevs_sensor_table[tevs->selected_sensor].code_list[i])
++			break;
++	}
++	if (i >= tevs_sensor_table[tevs->selected_sensor].code_list_size)
++		mbus_fmt->code =
++			tevs_sensor_table[tevs->selected_sensor].code_list[0];
+ 	dev_dbg(sub_dev->dev, "%s() selected mode index [%d]\n", __func__,
+ 		tevs->selected_mode);
+ 
+@@ -1372,14 +1405,14 @@ static int tevs_set_bsl_mode(struct tevs *tevs, s32 mode)
+ 		}
+ 
+ 		tevs_i2c_write_16b(tevs, HOST_COMMAND_ISP_CTRL_PREVIEW_FORMAT,
+-				   TEVS_IMG_FORMAT_UYVY);
++				   tevs_img_format(tevs));
+ 		tevs_i2c_write_16b(tevs,
+ 				   HOST_COMMAND_ISP_CTRL_PREVIEW_HINF_CTRL,
+ 				   0x10 | (tevs->continuous_clock << 5) |
+ 					   (tevs->data_lanes));
+ 		tevs_i2c_write_16b(tevs,
+ 				   HOST_COMMAND_ISP_CTRL_PREVIEW_MIPI_CTRL,
+-				   tevs->vc_id);
++				   tevs_mipi_ctrl(tevs));
+ 		break;
+ 	case TEVS_BSL_MODE_FLASH_IDX:
+ 		ret = regulator_bulk_disable(TEVS_NUM_SUPPLIES, tevs->supplies);
+@@ -2076,14 +2109,14 @@ static int tevs_power_on(struct device *dev)
+ 
+ 		ret += tevs_i2c_write_16b(
+ 			tevs, HOST_COMMAND_ISP_CTRL_PREVIEW_FORMAT,
+-			TEVS_IMG_FORMAT_UYVY);
++			tevs_img_format(tevs));
+ 		ret += tevs_i2c_write_16b(
+ 			tevs, HOST_COMMAND_ISP_CTRL_PREVIEW_HINF_CTRL,
+ 			0x10 | (tevs->continuous_clock << 5) |
+ 				(tevs->data_lanes));
+ 		ret += tevs_i2c_write_16b(
+ 			tevs, HOST_COMMAND_ISP_CTRL_PREVIEW_MIPI_CTRL,
+-			tevs->vc_id);
++			tevs_mipi_ctrl(tevs));
+ 	}
+ 
+ 	return ret;
+diff --git a/drivers/media/i2c/tevs/tevs_tbls.h b/drivers/media/i2c/tevs/tevs_tbls.h
+index f3a12f4..b54e9cd 100644
+--- a/drivers/media/i2c/tevs/tevs_tbls.h
++++ b/drivers/media/i2c/tevs/tevs_tbls.h
+@@ -350,6 +350,7 @@ static struct resolution ar0821_res_list[] = {
+ /* AR0822 default setting for 4 data lanes and data frequency 800 MHz */
+ static u32 ar0822_code_list[] = {
+ 	MEDIA_BUS_FMT_UYVY8_1X16,
++	MEDIA_BUS_FMT_Y8_1X8,
+ };
+ 
+ static u16 ar0822_framerates_640x480[] = { 60, 30, 20, 15, 10, 5 };

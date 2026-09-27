@@ -51,8 +51,9 @@ int main() {
                 break;
             }
             cv::Mat uyvy(format.height, format.width, CV_8UC2, buffer.data());
+            // Mono sensor: Y is the image, U/V are constant.
             cv::Mat image;
-            cv::cvtColor(uyvy, image, cv::COLOR_YUV2BGR_UYVY);
+            cv::cvtColor(uyvy, image, cv::COLOR_YUV2GRAY_UYVY);
             cv::imshow("TEVS AR0822", image);
             int key = cv::waitKey(1);
             if (key == 'q' || key == 27) break;

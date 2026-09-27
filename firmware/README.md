@@ -1,6 +1,7 @@
 ﻿# TEVS-AR0822 preview
 
-Opens camera 0, selects its first UYVY format, and displays frames with OpenCV.
+Opens camera 0, selects its first UYVY format, and displays the mono (Y)
+channel with OpenCV.
 Press **q** or **Esc** to quit. Capture errors stop the program.
 
 ## 1. Prepare the Raspberry Pi
@@ -111,3 +112,43 @@ Uses the [C++ Camera Capture API](https://developer.technexion.com/docs/vision-s
 Requires tightly packed UYVY (width * height * 2 bytes). The SDK's `VxGetImage`
 has no buffer-capacity argument; confirm this layout on the target SDK.
 Real SDK compilation and camera preview have not been validated locally.
+
+## Why there is no RAW format (and the Y8 workaround)
+
+TechNexion's Raspberry Pi driver (`tn_rpi_kernel-6.12`) lists only
+`UYVY8_1X16` for the AR0822 (`tevs_tbls.h`). It also writes UYVY to the camera's
+on-board ISP every time it configures a stream (`tevs_main.c`). VizionSDK only
+reports formats the driver exposes, and its `VX_IMAGE_FORMAT` has no GREY or
+RAW entry.
+
+This camera is mono, so UYVY already carries the full 8-bit image in Y
+(U/V are constant). The samples above convert UYVY to grayscale, so no
+driver change is needed for mono pixels.
+
+To stream 8-bit mono directly (half the bandwidth of UYVY), apply
+`driver/tevs-ar0822-y8.patch`. It adds `Y8_1X8` to the AR0822 and programs the
+ISP for Y8 over CSI-2 RAW8. The Pi 5 (rp1-cfe) and Pi 4 (unicam) receivers
+already accept Y8 as `GREY`. Run these on the Pi after TechNexion's normal
+driver install:
+
+```sh
+sh firmware/driver/install_tevs_y8.sh
+sudo reboot
+sh firmware/driver/setup_y8.sh 1920 1080      # prints the video node
+python firmware/src/monoPreview.py /dev/video0 1920 1080
+```
+
+Replace `/dev/video0` with the node `setup_y8.sh` prints. Capture one raw frame
+without OpenCV:
+
+```sh
+v4l2-ctl -d /dev/video0 --stream-mmap --stream-count=1 --stream-to=frame.gray
+```
+
+UYVY stays the default format, so VizionSDK and the samples above keep working.
+
+**Experimental ISP bypass:** the module parameter `bypass_isp=1` makes Y8 request
+TEVS format `0x80` (RAW8, ISP bypassed) instead of `0x52`. TechNexion does not
+document that value for this module, so frames may not arrive. Try it with
+`sudo modprobe -r tevs && sudo modprobe tevs bypass_isp=1`. Reload without the
+parameter to undo. Output above 8 bits is not exposed by any TEVS driver.

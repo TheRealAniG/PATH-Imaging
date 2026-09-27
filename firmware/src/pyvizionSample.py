@@ -40,7 +40,8 @@ def main():
             if result != 0:
                 raise RuntimeError(f"Frame capture failed: {result}")
             uyvy = np.frombuffer(frame, dtype=np.uint8).reshape(selected.height, selected.width, 2)
-            image = cv2.cvtColor(uyvy, cv2.COLOR_YUV2BGR_UYVY)
+            # Mono sensor: Y is the image, U/V are constant.
+            image = cv2.cvtColor(uyvy, cv2.COLOR_YUV2GRAY_UYVY)
             cv2.imshow("TEVS AR0822", image)
             if cv2.waitKey(1) & 0xFF in (ord("q"), 27):
                 break
