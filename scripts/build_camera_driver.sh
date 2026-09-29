@@ -3,10 +3,15 @@
 set -euo pipefail
 repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 release=$(uname -r)
-if [[ "$release" != 6.12.* || "$(uname -m)" != aarch64 ]]; then
-    echo "This helper targets the CM5's ARM64 6.12 kernel. See TechNexion's guide for other kernels." >&2
+if [[ "$(uname -m)" != aarch64 ]]; then
+    echo "This helper requires ARM64." >&2
     exit 1
 fi
+case "$release" in
+    6.12.*) branch=tn_rpi_kernel-6.12; revision=6611bfe782c3606ef960cae74c1220ad09f4dbce ;;
+    6.18.*) branch=tn_rpi_kernel-6.18; revision=c681dd09c0e815d2ace2065eff867f02702c32a8 ;;
+    *) echo "Unsupported kernel: $release. Supported families: 6.12 and 6.18." >&2; exit 1 ;;
+esac
 headers="/lib/modules/$release/build"
 includes="/usr/src/linux-headers-${release%%+*}+rpt-common-rpi/include"
 if [[ ! -d "$headers" || ! -f "$includes/dt-bindings/gpio/gpio.h" ]]; then
@@ -14,12 +19,16 @@ if [[ ! -d "$headers" || ! -f "$includes/dt-bindings/gpio/gpio.h" ]]; then
     exit 1
 fi
 build="$repo_root/.camera-driver"
-revision=6611bfe782c3606ef960cae74c1220ad09f4dbce
 mkdir -p "$build"
 if [[ ! -d "$build/source/.git" ]]; then
     git clone --no-checkout https://github.com/TechNexion-Vision/tn-rpi-camera-driver.git "$build/source"
 fi
-git -C "$build/source" checkout --detach "$revision"
+if ! git -C "$build/source" cat-file -e "$revision^{commit}" 2>/dev/null; then
+    git -C "$build/source" fetch origin "$branch"
+fi
+git -C "$build/source" checkout --force --detach "$revision"
+# Adds AR0822 RAW8 (Y8_1X8); UYVY stays the default. Written and tested on 6.18.
+git -C "$build/source" apply "$repo_root/patches/tevs-raw8.patch"
 make -C "$headers" M="$build/source/drivers/media/i2c/tevs" CONFIG_VIDEO_TEVS=m modules -j2
 cpp -nostdinc -undef -D__DTS__ -x assembler-with-cpp -I "$includes" \
     "$build/source/arch/arm64/boot/dts/overlays/tevs-rpi22-overlay.dts" > "$build/tevs-rpi22.dts"
