@@ -1,5 +1,21 @@
 [project]
 name = "path-imaging"
 version = "0.1.0"
-requires-python = ">=3.13"
-dependencies = []
+requires-python = ">=3.13,<3.15"
+dependencies = [
+    "numpy>=1.21.0",
+    "pillow>=11.0",
+    "pyvizionsdk==26.9.1",
+]
+
+[tool.uv]
+cache-dir = "/opt/path/uv-cache"
+python-preference = "only-system"
+
+[[tool.uv.index]]
+name = "vizionsdk"
+url = "https://pypi.vizionsdk.com/root/pyvizionsdk/+simple/"
+explicit = true
+
+[tool.uv.sources]
+pyvizionsdk = { index = "vizionsdk" }

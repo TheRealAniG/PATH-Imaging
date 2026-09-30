@@ -2,4 +2,15 @@
 __pycache__/
 *.pyc
 .DS_Store
+.camera-driver/
+raw8.pgm
 
+# Captured frames from RAW_display.py
+raw_frame.raw
+raw_frame.png
+uyvy_frame.raw
+uyvy_frame.png
+
+
+# Local vendor reference checkout; SDK is installed through uv
+/vizionsdk-python/
