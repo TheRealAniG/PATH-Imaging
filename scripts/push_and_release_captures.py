@@ -69,6 +69,10 @@ def main():
                 raise RuntimeError(f"Unexpected LFS cache contents: {cached}")
             released += cached.stat().st_size
             cached.unlink()
+    if captures:
+        # Pointer bytes already match HEAD; refresh the index's file metadata.
+        subprocess.run(["git", "add", "--",
+                        *[str(path.relative_to(root)) for path, _, _ in captures]], check=True)
     print(f"Pushed {branch}; {len(captures)} captures are local pointers. "
           f"Released {released / 1024**2:.1f} MiB of image data.")
     print("Restore images when needed with: git lfs pull")
