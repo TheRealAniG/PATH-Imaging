@@ -34,6 +34,20 @@ images. The sample run in `captures/uyvy-20260930-183613-255940/` contains ten
 verified, distinct 1920×1080 frames captured with a requested 60 fps mode;
 the test does not establish sustained capture at 60 fps.
 
+To push committed work and free local image storage, run from the worktree root:
+
+```bash
+uv run scripts/push_and_release_captures.py
+```
+
+The script verifies the remote commit and LFS upload before replacing committed
+capture files with pointers and removing those images from the local LFS cache.
+It requires a clean working tree. It also disables automatic LFS downloads in
+this repository's local configuration (shared by its worktrees). Use `git lfs pull`
+to restore full images when needed. Run the script again after future capture
+commits; a plain `git push` does not release local image data.
+
+
 ### Capture API (`camera_API.py`)
 
 `camera_API.py` is TechNexion's pyvizionsdk plus RAW8. Every `Vx...` function and
