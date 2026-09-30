@@ -22,7 +22,8 @@ uv run camera_capture.py --frames 30
 ```
 
 Saves monochrome PGM images in a new timestamped `captures/` directory, then
-stops and closes the camera. No desktop or GTK is needed. Defaults to
+stops and closes the camera. Frames are buffered in RAM during acquisition and
+written after streaming stops. No desktop or GTK is needed. Defaults to
 1920×1080 at a requested 60 fps. Choose a supported mode with `--width`,
 `--height`, and `--fps`; add `--raw8` for sensor RAW8 or `--output-dir` for a
 new output directory. Disk writes may reduce the rate of saved frames.
@@ -36,6 +37,21 @@ uv run scripts/capture_raw8_1080p60.py
 This saves unprocessed 8-bit sensor values in lossless PGM files under a new
 `captures/raw8-.../` directory. It skips the startup frame and closes the camera
 after the tenth saved image. Disk writes may reduce the saved-frame rate.
+
+Every new capture writes `capture.json` with before/after exposure and gain
+control snapshots, the SDK's current-exposure readings, firmware/kernel/package
+versions, active media topology, ISP-bypass state, source hashes, and UTC and
+monotonic timestamps. It reports host frame-delivery rate and interval jitter,
+read/write durations, timeouts, image checksums, and pixel/clipping statistics.
+Acquisition timing excludes image writes and analysis. Uniform, saturated, or
+repeated frames and delivery below the requested rate are flagged.
+
+V4L2 controls can be cached, especially in auto-exposure mode. SDK exposure
+readings are snapshots, not per-frame measurements. Exposure control values and
+AE bounds use microseconds ([TechNexion exposure guide](https://developer.technexion.com/docs/camera-frame-rate-configuration-guide-adjusting-fps-in-different-exposure-modes)).
+Host delivery timing includes pipe buffering and does not establish sensor FPS;
+hardware timestamps, frame sequence numbers, and dropped-frame counts are not
+available through the current capture API. Settings are read without modification.
 
 Captured PGM images under `captures/` are tracked through Git LFS. Install
 `git-lfs` and run `git lfs install` before committing captures. Git stores

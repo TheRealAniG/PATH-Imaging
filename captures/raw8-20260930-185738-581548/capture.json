@@ -1,0 +1,631 @@
+{
+  "schema_version": 1,
+  "capture_started_utc": "2026-09-30T22:57:38.602165+00:00",
+  "camera_name": "TEVS-AR0822-M (/dev/video0)",
+  "format": "RAW8",
+  "container": "PGM",
+  "width": 1920,
+  "height": 1080,
+  "bit_depth": 8,
+  "requested_fps": 60,
+  "requested_frames": 10,
+  "provenance": {
+    "kernel": "6.18.50+rpt-rpi-2712",
+    "machine": "aarch64",
+    "python": "3.13.5",
+    "packages": {
+      "numpy": "2.5.3",
+      "pillow": "12.3.0",
+      "pyvizionsdk": "26.9.1"
+    },
+    "git_commit_at_capture": {
+      "returncode": 0,
+      "stdout": "230457e56508a4afed2fb916a9aad8a7e01b68e9",
+      "stderr": ""
+    },
+    "git_status_at_capture": {
+      "returncode": 0,
+      "stdout": "M README.md\n M camera_capture.py\n?? capture_metadata.py\n?? captures/raw8-20260930-185507-903320/",
+      "stderr": ""
+    },
+    "source_sha256": {
+      "camera_capture.py": "f02ba498d0fd7b1e63b5e3fc0f01279437d768f15cf8619c7f2c7607fddac35d",
+      "camera_API.py": "1bb76db155eef24226f480845d8c56a8ee70a484d79698c93bc8d54427198690",
+      "capture_metadata.py": "95ec689e167811802e23e164380ea4d0cdbb0a454776c51ebf5436125a3efa84",
+      "scripts/capture_raw8_1080p60.py": "e09189600a7116519b42f36e2e003f33821f8e47f2cdda5adce0aba7346a9039"
+    },
+    "driver": {
+      "returncode": 0,
+      "stdout": "filename:       /lib/modules/6.18.50+rpt-rpi-2712/extra/tevs.ko\nalias:          Camera\nversion:        2.0\nlicense:        GPL\ndescription:    TechNexion TEVS camera driver\nauthor:         TECHNEXION Inc.\nsrcversion:     607F855155294131BBAF308\nalias:          of:N*T*Ctn,tevmC*\nalias:          of:N*T*Ctn,tevm\nalias:          of:N*T*Ctn,tevsC*\nalias:          of:N*T*Ctn,tevs\ndepends:        videodev,v4l2-async,v4l2-fwnode,regmap-i2c,mc,v4l2-cci\nname:           tevs\nvermagic:       6.18.50+rpt-rpi-2712 SMP preempt mod_unload modversions aarch64\nparm:           bypass_isp:Y8 requests sensor RAW8 (0x80, default) instead of ISP Y-only (0x52, returns black frames on AR0822 fw 25.10.0.1) (bool)",
+      "stderr": ""
+    }
+  },
+  "before_streaming": {
+    "utc": "2026-09-30T22:57:38.631714+00:00",
+    "monotonic_ns": 5037633411512,
+    "media_device": "/dev/media1",
+    "sensor_entity": "tevs 10-0048",
+    "video_device": "/dev/video0",
+    "sensor_device": "/dev/v4l-subdev2",
+    "media_topology": {
+      "returncode": 0,
+      "stdout": "Media controller API version 6.18.50\n\nMedia device information\n------------------------\ndriver          rp1-cfe\nmodel           rp1-cfe\nserial          \nbus info        platform:1f00110000.csi\nhw revision     0x114666\ndriver version  6.18.50\n\nDevice topology\n- entity 1: csi2 (8 pads, 8 links, 0 routes)\n            type V4L2 subdev subtype Unknown flags 0\n            device node name /dev/v4l-subdev0\n\tpad0: SINK\n\t\t[stream:0 fmt:Y8_1X8/1920x1080 field:none]\n\t\t<- \"tevs 10-0048\":0 [ENABLED,IMMUTABLE]\n\tpad1: SINK\n\t\t[stream:0 fmt:unknown/16384x1 field:none]\n\tpad2: SINK\n\t\t[stream:0 fmt:SRGGB10_1X10/640x480 field:none colorspace:raw xfer:none ycbcr:601 quantization:full-range]\n\tpad3: SINK\n\t\t[stream:0 fmt:SRGGB10_1X10/640x480 field:none colorspace:raw xfer:none ycbcr:601 quantization:full-range]\n\tpad4: SOURCE\n\t\t[stream:0 fmt:Y8_1X8/1920x1080 field:none]\n\t\t-> \"rp1-cfe-csi2_ch0\":0 [ENABLED]\n\t\t-> \"pisp-fe\":0 []\n\tpad5: SOURCE\n\t\t[stream:0 fmt:unknown/16384x1 field:none]\n\t\t-> \"rp1-cfe-embedded\":0 []\n\tpad6: SOURCE\n\t\t[stream:0 fmt:SRGGB10_1X10/640x480 field:none colorspace:raw xfer:none ycbcr:601 quantization:full-range]\n\t\t-> \"rp1-cfe-csi2_ch2\":0 []\n\t\t-> \"pisp-fe\":0 []\n\tpad7: SOURCE\n\t\t[stream:0 fmt:SRGGB10_1X10/640x480 field:none colorspace:raw xfer:none ycbcr:601 quantization:full-range]\n\t\t-> \"rp1-cfe-csi2_ch3\":0 []\n\t\t-> \"pisp-fe\":0 []\n\n- entity 10: pisp-fe (5 pads, 7 links, 0 routes)\n             type V4L2 subdev subtype Unknown flags 0\n             device node name /dev/v4l-subdev1\n\tpad0: SINK,MUST_CONNECT\n\t\t[stream:0 fmt:SRGGB16_1X16/640x480 field:none colorspace:raw xfer:none ycbcr:601 quantization:full-range]\n\t\t<- \"csi2\":4 []\n\t\t<- \"csi2\":6 []\n\t\t<- \"csi2\":7 []\n\tpad1: SINK\n\t\t[stream:0 fmt:FIXED/16384x1 field:none]\n\t\t<- \"rp1-cfe-fe_config\":0 []\n\tpad2: SOURCE\n\t\t[stream:0 fmt:SRGGB16_1X16/640x480 field:none colorspace:raw xfer:none ycbcr:601 quantization:full-range]\n\t\t-> \"rp1-cfe-fe_image0\":0 []\n\tpad3: SOURCE\n\t\t[stream:0 fmt:SRGGB16_1X16/640x480 field:none colorspace:raw xfer:none ycbcr:601 quantization:full-range]\n\t\t-> \"rp1-cfe-fe_image1\":0 []\n\tpad4: SOURCE\n\t\t[stream:0 fmt:FIXED/16384x1 field:none]\n\t\t-> \"rp1-cfe-fe_stats\":0 []\n\n- entity 16: tevs 10-0048 (1 pad, 1 link, 0 routes)\n             type V4L2 subdev subtype Sensor flags 0\n             device node name /dev/v4l-subdev2\n\tpad0: SOURCE\n\t\t[stream:0 fmt:Y8_1X8/1920x1080@1/60 field:none colorspace:srgb xfer:srgb ycbcr:601 quantization:full-range\n\t\t crop.bounds:(0,0)/3840x2160\n\t\t crop:(0,0)/1920x1080]\n\t\t-> \"csi2\":0 [ENABLED,IMMUTABLE]\n\n- entity 18: rp1-cfe-csi2_ch0 (1 pad, 1 link)\n             type Node subtype V4L flags 0\n             device node name /dev/video0\n\tpad0: SINK,MUST_CONNECT\n\t\t<- \"csi2\":4 [ENABLED]\n\n- entity 22: rp1-cfe-embedded (1 pad, 1 link)\n             type Node subtype V4L flags 0\n             device node name /dev/video1\n\tpad0: SINK,MUST_CONNECT\n\t\t<- \"csi2\":5 []\n\n- entity 26: rp1-cfe-csi2_ch2 (1 pad, 1 link)\n             type Node subtype V4L flags 0\n             device node name /dev/video2\n\tpad0: SINK,MUST_CONNECT\n\t\t<- \"csi2\":6 []\n\n- entity 30: rp1-cfe-csi2_ch3 (1 pad, 1 link)\n             type Node subtype V4L flags 0\n             device node name /dev/video3\n\tpad0: SINK,MUST_CONNECT\n\t\t<- \"csi2\":7 []\n\n- entity 34: rp1-cfe-fe_image0 (1 pad, 1 link)\n             type Node subtype V4L flags 1\n             device node name /dev/video4\n\tpad0: SINK,MUST_CONNECT\n\t\t<- \"pisp-fe\":2 []\n\n- entity 38: rp1-cfe-fe_image1 (1 pad, 1 link)\n             type Node subtype V4L flags 0\n             device node name /dev/video5\n\tpad0: SINK,MUST_CONNECT\n\t\t<- \"pisp-fe\":3 []\n\n- entity 42: rp1-cfe-fe_stats (1 pad, 1 link)\n             type Node subtype V4L flags 0\n             device node name /dev/video6\n\tpad0: SINK,MUST_CONNECT\n\t\t<- \"pisp-fe\":4 []\n\n- entity 46: rp1-cfe-fe_config (1 pad, 1 link)\n             type Node subtype V4L flags 0\n             device node name /dev/video7\n\tpad0: SOURCE,MUST_CONNECT\n\t\t-> \"pisp-fe\":1 []",
+      "stderr": ""
+    },
+    "video_format": {
+      "returncode": 0,
+      "stdout": "Format Video Capture:\n\tWidth/Height      : 1920/1080\n\tPixel Format      : 'GREY' (8-bit Greyscale)\n\tField             : None\n\tBytes per Line    : 1920\n\tSize Image        : 2073600\n\tColorspace        : Rec. 709\n\tTransfer Function : Rec. 709\n\tYCbCr/HSV Encoding: Rec. 709\n\tQuantization      : Limited Range\n\tFlags             : set-csc",
+      "stderr": ""
+    },
+    "v4l2_controls_raw": {
+      "returncode": 0,
+      "stdout": "User Controls\n\n                     brightness 0x00980900 (int)    : min=0 max=8192 step=1 default=4096 value=4096 flags=slider, has-min-max\n                       contrast 0x00980901 (int)    : min=0 max=40960 step=1 default=20480 value=20480 flags=slider, has-min-max\n                     saturation 0x00980902 (int)    : min=0 max=20480 step=1 default=0 value=0 flags=slider, has-min-max\n             white_balance_mode 0x0098090c (menu)   : min=0 max=1 default=1 value=1 (Auto Mode) flags=has-min-max\n\t\t\t\t0: Manual Temp Mode\n\t\t\t\t1: Auto Mode\n                          gamma 0x00980910 (int)    : min=1638 max=32358 step=1 default=9011 value=9011 flags=slider, has-min-max\n                       exposure 0x00980911 (int)    : min=1 max=1000000 step=1 default=10000 value=10000 flags=has-min-max\n                           gain 0x00980913 (int)    : min=1 max=64 step=1 default=1 value=1 flags=has-min-max\n                horizontal_flip 0x00980914 (bool)   : default=0 value=0 flags=has-min-max\n                  vertical_flip 0x00980915 (bool)   : default=0 value=0 flags=has-min-max\n           power_line_frequency 0x00980918 (menu)   : min=0 max=3 default=0 value=0 (Disabled) flags=has-min-max\n\t\t\t\t0: Disabled\n\t\t\t\t1: 50 Hz\n\t\t\t\t2: 60 Hz\n\t\t\t\t3: Auto\n      white_balance_temperature 0x0098091a (int)    : min=2300 max=15000 step=1 default=5000 value=5000 flags=has-min-max\n                      sharpness 0x0098091b (int)    : min=0 max=16384 step=1 default=8192 value=8192 flags=slider, has-min-max\n         backlight_compensation 0x0098091c (int)    : min=0 max=7680 step=1 default=4096 value=4096 flags=has-min-max\n                 special_effect 0x0098091f (menu)   : min=0 max=4 default=0 value=0 (Normal Mode) flags=has-min-max\n\t\t\t\t0: Normal Mode\n\t\t\t\t1: Black and White Mode\n\t\t\t\t2: Grayscale Mode\n\t\t\t\t3: Negative Mode\n\t\t\t\t4: Sketch Mode\n                       bsl_mode 0x00982900 (menu)   : min=0 max=1 default=0 value=0 (Normal Mode) flags=has-min-max\n\t\t\t\t0: Normal Mode\n\t\t\t\t1: Bootstrap Mode\n                        max_fps 0x00982901 (int)    : min=1 max=255 step=1 default=30 value=60 flags=has-min-max\n                        denoise 0x00982902 (int)    : min=0 max=16384 step=1 default=8192 value=8192 flags=has-min-max\n              ae_exposure_upper 0x00982903 (int)    : min=1 max=1000000 step=1 default=16666 value=16666 flags=has-min-max\n                ae_exposure_max 0x00982904 (int)    : min=1 max=1000000 step=1 default=66666 value=66666 flags=has-min-max\n                   trigger_mode 0x00982905 (menu)   : min=0 max=3 default=0 value=0 (Disabled) flags=has-min-max\n\t\t\t\t0: Disabled\n\t\t\t\t1: Sync to Trigger Mode\n\t\t\t\t2: Periodic Trigger Mode\n\t\t\t\t3: Non Periodic Trigger Mode\n\nCamera Controls\n\n                  exposure_mode 0x009a0901 (menu)   : min=0 max=2 default=1 value=1 (Auto Mode) flags=has-min-max\n\t\t\t\t0: Manual Mode\n\t\t\t\t1: Auto Mode\n\t\t\t\t2: AGC Mode\n                   pan_absolute 0x009a0908 (int)    : min=0 max=256 step=1 default=128 value=128 flags=has-min-max\n                  tilt_absolute 0x009a0909 (int)    : min=0 max=256 step=1 default=128 value=128 flags=has-min-max\n                  zoom_absolute 0x009a090d (int)    : min=256 max=2048 step=1 default=256 value=256 flags=has-min-max\n             camera_orientation 0x009a0922 (menu)   : min=0 max=2 default=0 value=0 (Front) flags=read-only, has-min-max\n\t\t\t\t0: Front\n\t\t\t\t1: Back\n\t\t\t\t2: External\n         camera_sensor_rotation 0x009a0923 (int)    : min=180 max=180 step=1 default=180 value=180 flags=read-only, has-min-max\n\nImage Source Controls\n\n              vertical_blanking 0x009e0901 (int)    : min=0 max=0 step=1 default=0 value=0 flags=has-min-max\n            horizontal_blanking 0x009e0902 (int)    : min=0 max=0 step=1 default=0 value=0 flags=has-min-max\n                  analogue_gain 0x009e0903 (int)    : min=1 max=64 step=1 default=1 value=1 flags=has-min-max\n\nImage Processing Controls\n\n                 link_frequency 0x009f0901 (intmenu): min=0 max=0 default=0 value=0 (400000000 0x17d78400) flags=read-only, has-min-max\n\t\t\t\t0: 400000000 (0x17d78400)\n                     pixel_rate 0x009f0902 (int64)  : min=200000000 max=200000000 step=1 default=200000000 value=200000000 flags=read-only, has-min-max",
+      "stderr": ""
+    },
+    "v4l2_controls": {
+      "brightness": {
+        "value": 4096,
+        "label": null
+      },
+      "contrast": {
+        "value": 20480,
+        "label": null
+      },
+      "saturation": {
+        "value": 0,
+        "label": null
+      },
+      "white_balance_mode": {
+        "value": 1,
+        "label": "Auto Mode"
+      },
+      "gamma": {
+        "value": 9011,
+        "label": null
+      },
+      "exposure": {
+        "value": 10000,
+        "label": null
+      },
+      "gain": {
+        "value": 1,
+        "label": null
+      },
+      "horizontal_flip": {
+        "value": 0,
+        "label": null
+      },
+      "vertical_flip": {
+        "value": 0,
+        "label": null
+      },
+      "power_line_frequency": {
+        "value": 0,
+        "label": "Disabled"
+      },
+      "white_balance_temperature": {
+        "value": 5000,
+        "label": null
+      },
+      "sharpness": {
+        "value": 8192,
+        "label": null
+      },
+      "backlight_compensation": {
+        "value": 4096,
+        "label": null
+      },
+      "special_effect": {
+        "value": 0,
+        "label": "Normal Mode"
+      },
+      "bsl_mode": {
+        "value": 0,
+        "label": "Normal Mode"
+      },
+      "max_fps": {
+        "value": 60,
+        "label": null
+      },
+      "denoise": {
+        "value": 8192,
+        "label": null
+      },
+      "ae_exposure_upper": {
+        "value": 16666,
+        "label": null
+      },
+      "ae_exposure_max": {
+        "value": 66666,
+        "label": null
+      },
+      "trigger_mode": {
+        "value": 0,
+        "label": "Disabled"
+      },
+      "exposure_mode": {
+        "value": 1,
+        "label": "Auto Mode"
+      },
+      "pan_absolute": {
+        "value": 128,
+        "label": null
+      },
+      "tilt_absolute": {
+        "value": 128,
+        "label": null
+      },
+      "zoom_absolute": {
+        "value": 256,
+        "label": null
+      },
+      "camera_orientation": {
+        "value": 0,
+        "label": "Front"
+      },
+      "camera_sensor_rotation": {
+        "value": 180,
+        "label": null
+      },
+      "vertical_blanking": {
+        "value": 0,
+        "label": null
+      },
+      "horizontal_blanking": {
+        "value": 0,
+        "label": null
+      },
+      "analogue_gain": {
+        "value": 1,
+        "label": null
+      },
+      "link_frequency": {
+        "value": 0,
+        "label": "400000000 0x17d78400"
+      },
+      "pixel_rate": {
+        "value": 200000000,
+        "label": null
+      }
+    },
+    "isp_bypassed": true,
+    "VxGetCurrentExposure": {
+      "returncode": 0,
+      "value": 66618
+    },
+    "VxGetTEVSFirmwareVersion": {
+      "returncode": 0,
+      "value": "25.10.00.01"
+    },
+    "VxGetSensorFirmwareVersion": {
+      "returncode": 0,
+      "value": "25.07.448.00"
+    },
+    "exposure_notes": "V4L2 values are driver control snapshots, potentially cached; exposure and AE limits use microseconds. Auto-exposure can change actual exposure/gain. VxGetCurrentExposure is an SDK snapshot, not tied to a specific saved frame; its raw returned value is retained without inferring units."
+  },
+  "timing": {
+    "timestamp_source": "host monotonic clock after VxGetImage returns",
+    "sensor_timestamps_available": false,
+    "sensor_sequence_numbers_available": false,
+    "dropped_frames": null,
+    "startup_seconds": 0.159410228,
+    "acquisition_seconds": 0.733281272,
+    "timeouts": 0,
+    "host_delivery_fps": 15.010501922547588,
+    "interarrival_ms": {
+      "min": 3.601797,
+      "mean": 66.6200241111111,
+      "median": 66.615185,
+      "p95": 104.31352819999998,
+      "max": 129.041461,
+      "std": 29.56742821140698
+    },
+    "notes": "Frames are buffered in RAM and saved after streaming stops. Host delivery includes pipe buffering and copying; it does not prove sensor FPS or absence of dropped frames. A ten-frame sample is a short performance check.",
+    "save_and_analysis_seconds": 0.317185288
+  },
+  "warmup_frames_discarded": 2,
+  "after_acquisition": {
+    "utc": "2026-09-30T22:57:39.601699+00:00",
+    "monotonic_ns": 5038603394496,
+    "media_device": "/dev/media1",
+    "sensor_entity": "tevs 10-0048",
+    "video_device": "/dev/video0",
+    "sensor_device": "/dev/v4l-subdev2",
+    "media_topology": {
+      "returncode": 0,
+      "stdout": "Media controller API version 6.18.50\n\nMedia device information\n------------------------\ndriver          rp1-cfe\nmodel           rp1-cfe\nserial          \nbus info        platform:1f00110000.csi\nhw revision     0x114666\ndriver version  6.18.50\n\nDevice topology\n- entity 1: csi2 (8 pads, 8 links, 0 routes)\n            type V4L2 subdev subtype Unknown flags 0\n            device node name /dev/v4l-subdev0\n\tpad0: SINK\n\t\t[stream:0 fmt:Y8_1X8/1920x1080 field:none]\n\t\t<- \"tevs 10-0048\":0 [ENABLED,IMMUTABLE]\n\tpad1: SINK\n\t\t[stream:0 fmt:unknown/16384x1 field:none]\n\tpad2: SINK\n\t\t[stream:0 fmt:SRGGB10_1X10/640x480 field:none colorspace:raw xfer:none ycbcr:601 quantization:full-range]\n\tpad3: SINK\n\t\t[stream:0 fmt:SRGGB10_1X10/640x480 field:none colorspace:raw xfer:none ycbcr:601 quantization:full-range]\n\tpad4: SOURCE\n\t\t[stream:0 fmt:Y8_1X8/1920x1080 field:none]\n\t\t-> \"rp1-cfe-csi2_ch0\":0 [ENABLED]\n\t\t-> \"pisp-fe\":0 []\n\tpad5: SOURCE\n\t\t[stream:0 fmt:unknown/16384x1 field:none]\n\t\t-> \"rp1-cfe-embedded\":0 []\n\tpad6: SOURCE\n\t\t[stream:0 fmt:SRGGB10_1X10/640x480 field:none colorspace:raw xfer:none ycbcr:601 quantization:full-range]\n\t\t-> \"rp1-cfe-csi2_ch2\":0 []\n\t\t-> \"pisp-fe\":0 []\n\tpad7: SOURCE\n\t\t[stream:0 fmt:SRGGB10_1X10/640x480 field:none colorspace:raw xfer:none ycbcr:601 quantization:full-range]\n\t\t-> \"rp1-cfe-csi2_ch3\":0 []\n\t\t-> \"pisp-fe\":0 []\n\n- entity 10: pisp-fe (5 pads, 7 links, 0 routes)\n             type V4L2 subdev subtype Unknown flags 0\n             device node name /dev/v4l-subdev1\n\tpad0: SINK,MUST_CONNECT\n\t\t[stream:0 fmt:SRGGB16_1X16/640x480 field:none colorspace:raw xfer:none ycbcr:601 quantization:full-range]\n\t\t<- \"csi2\":4 []\n\t\t<- \"csi2\":6 []\n\t\t<- \"csi2\":7 []\n\tpad1: SINK\n\t\t[stream:0 fmt:FIXED/16384x1 field:none]\n\t\t<- \"rp1-cfe-fe_config\":0 []\n\tpad2: SOURCE\n\t\t[stream:0 fmt:SRGGB16_1X16/640x480 field:none colorspace:raw xfer:none ycbcr:601 quantization:full-range]\n\t\t-> \"rp1-cfe-fe_image0\":0 []\n\tpad3: SOURCE\n\t\t[stream:0 fmt:SRGGB16_1X16/640x480 field:none colorspace:raw xfer:none ycbcr:601 quantization:full-range]\n\t\t-> \"rp1-cfe-fe_image1\":0 []\n\tpad4: SOURCE\n\t\t[stream:0 fmt:FIXED/16384x1 field:none]\n\t\t-> \"rp1-cfe-fe_stats\":0 []\n\n- entity 16: tevs 10-0048 (1 pad, 1 link, 0 routes)\n             type V4L2 subdev subtype Sensor flags 0\n             device node name /dev/v4l-subdev2\n\tpad0: SOURCE\n\t\t[stream:0 fmt:Y8_1X8/1920x1080@1/60 field:none colorspace:srgb xfer:srgb ycbcr:601 quantization:full-range\n\t\t crop.bounds:(0,0)/3840x2160\n\t\t crop:(0,0)/1920x1080]\n\t\t-> \"csi2\":0 [ENABLED,IMMUTABLE]\n\n- entity 18: rp1-cfe-csi2_ch0 (1 pad, 1 link)\n             type Node subtype V4L flags 0\n             device node name /dev/video0\n\tpad0: SINK,MUST_CONNECT\n\t\t<- \"csi2\":4 [ENABLED]\n\n- entity 22: rp1-cfe-embedded (1 pad, 1 link)\n             type Node subtype V4L flags 0\n             device node name /dev/video1\n\tpad0: SINK,MUST_CONNECT\n\t\t<- \"csi2\":5 []\n\n- entity 26: rp1-cfe-csi2_ch2 (1 pad, 1 link)\n             type Node subtype V4L flags 0\n             device node name /dev/video2\n\tpad0: SINK,MUST_CONNECT\n\t\t<- \"csi2\":6 []\n\n- entity 30: rp1-cfe-csi2_ch3 (1 pad, 1 link)\n             type Node subtype V4L flags 0\n             device node name /dev/video3\n\tpad0: SINK,MUST_CONNECT\n\t\t<- \"csi2\":7 []\n\n- entity 34: rp1-cfe-fe_image0 (1 pad, 1 link)\n             type Node subtype V4L flags 1\n             device node name /dev/video4\n\tpad0: SINK,MUST_CONNECT\n\t\t<- \"pisp-fe\":2 []\n\n- entity 38: rp1-cfe-fe_image1 (1 pad, 1 link)\n             type Node subtype V4L flags 0\n             device node name /dev/video5\n\tpad0: SINK,MUST_CONNECT\n\t\t<- \"pisp-fe\":3 []\n\n- entity 42: rp1-cfe-fe_stats (1 pad, 1 link)\n             type Node subtype V4L flags 0\n             device node name /dev/video6\n\tpad0: SINK,MUST_CONNECT\n\t\t<- \"pisp-fe\":4 []\n\n- entity 46: rp1-cfe-fe_config (1 pad, 1 link)\n             type Node subtype V4L flags 0\n             device node name /dev/video7\n\tpad0: SOURCE,MUST_CONNECT\n\t\t-> \"pisp-fe\":1 []",
+      "stderr": ""
+    },
+    "video_format": {
+      "returncode": 0,
+      "stdout": "Format Video Capture:\n\tWidth/Height      : 1920/1080\n\tPixel Format      : 'GREY' (8-bit Greyscale)\n\tField             : None\n\tBytes per Line    : 1920\n\tSize Image        : 2073600\n\tColorspace        : Rec. 709\n\tTransfer Function : Rec. 709\n\tYCbCr/HSV Encoding: Rec. 709\n\tQuantization      : Limited Range\n\tFlags             : set-csc",
+      "stderr": ""
+    },
+    "v4l2_controls_raw": {
+      "returncode": 0,
+      "stdout": "User Controls\n\n                     brightness 0x00980900 (int)    : min=0 max=8192 step=1 default=4096 value=4096 flags=slider, has-min-max\n                       contrast 0x00980901 (int)    : min=0 max=40960 step=1 default=20480 value=20480 flags=slider, has-min-max\n                     saturation 0x00980902 (int)    : min=0 max=20480 step=1 default=0 value=0 flags=slider, has-min-max\n             white_balance_mode 0x0098090c (menu)   : min=0 max=1 default=1 value=1 (Auto Mode) flags=has-min-max\n\t\t\t\t0: Manual Temp Mode\n\t\t\t\t1: Auto Mode\n                          gamma 0x00980910 (int)    : min=1638 max=32358 step=1 default=9011 value=9011 flags=slider, has-min-max\n                       exposure 0x00980911 (int)    : min=1 max=1000000 step=1 default=10000 value=10000 flags=has-min-max\n                           gain 0x00980913 (int)    : min=1 max=64 step=1 default=1 value=1 flags=has-min-max\n                horizontal_flip 0x00980914 (bool)   : default=0 value=0 flags=has-min-max\n                  vertical_flip 0x00980915 (bool)   : default=0 value=0 flags=has-min-max\n           power_line_frequency 0x00980918 (menu)   : min=0 max=3 default=0 value=0 (Disabled) flags=has-min-max\n\t\t\t\t0: Disabled\n\t\t\t\t1: 50 Hz\n\t\t\t\t2: 60 Hz\n\t\t\t\t3: Auto\n      white_balance_temperature 0x0098091a (int)    : min=2300 max=15000 step=1 default=5000 value=5000 flags=has-min-max\n                      sharpness 0x0098091b (int)    : min=0 max=16384 step=1 default=8192 value=8192 flags=slider, has-min-max\n         backlight_compensation 0x0098091c (int)    : min=0 max=7680 step=1 default=4096 value=4096 flags=has-min-max\n                 special_effect 0x0098091f (menu)   : min=0 max=4 default=0 value=0 (Normal Mode) flags=has-min-max\n\t\t\t\t0: Normal Mode\n\t\t\t\t1: Black and White Mode\n\t\t\t\t2: Grayscale Mode\n\t\t\t\t3: Negative Mode\n\t\t\t\t4: Sketch Mode\n                       bsl_mode 0x00982900 (menu)   : min=0 max=1 default=0 value=0 (Normal Mode) flags=has-min-max\n\t\t\t\t0: Normal Mode\n\t\t\t\t1: Bootstrap Mode\n                        max_fps 0x00982901 (int)    : min=1 max=255 step=1 default=30 value=60 flags=has-min-max\n                        denoise 0x00982902 (int)    : min=0 max=16384 step=1 default=8192 value=8192 flags=has-min-max\n              ae_exposure_upper 0x00982903 (int)    : min=1 max=1000000 step=1 default=16666 value=16666 flags=has-min-max\n                ae_exposure_max 0x00982904 (int)    : min=1 max=1000000 step=1 default=66666 value=66666 flags=has-min-max\n                   trigger_mode 0x00982905 (menu)   : min=0 max=3 default=0 value=0 (Disabled) flags=has-min-max\n\t\t\t\t0: Disabled\n\t\t\t\t1: Sync to Trigger Mode\n\t\t\t\t2: Periodic Trigger Mode\n\t\t\t\t3: Non Periodic Trigger Mode\n\nCamera Controls\n\n                  exposure_mode 0x009a0901 (menu)   : min=0 max=2 default=1 value=1 (Auto Mode) flags=has-min-max\n\t\t\t\t0: Manual Mode\n\t\t\t\t1: Auto Mode\n\t\t\t\t2: AGC Mode\n                   pan_absolute 0x009a0908 (int)    : min=0 max=256 step=1 default=128 value=128 flags=has-min-max\n                  tilt_absolute 0x009a0909 (int)    : min=0 max=256 step=1 default=128 value=128 flags=has-min-max\n                  zoom_absolute 0x009a090d (int)    : min=256 max=2048 step=1 default=256 value=256 flags=has-min-max\n             camera_orientation 0x009a0922 (menu)   : min=0 max=2 default=0 value=0 (Front) flags=read-only, has-min-max\n\t\t\t\t0: Front\n\t\t\t\t1: Back\n\t\t\t\t2: External\n         camera_sensor_rotation 0x009a0923 (int)    : min=180 max=180 step=1 default=180 value=180 flags=read-only, has-min-max\n\nImage Source Controls\n\n              vertical_blanking 0x009e0901 (int)    : min=0 max=0 step=1 default=0 value=0 flags=has-min-max\n            horizontal_blanking 0x009e0902 (int)    : min=0 max=0 step=1 default=0 value=0 flags=has-min-max\n                  analogue_gain 0x009e0903 (int)    : min=1 max=64 step=1 default=1 value=1 flags=has-min-max\n\nImage Processing Controls\n\n                 link_frequency 0x009f0901 (intmenu): min=0 max=0 default=0 value=0 (400000000 0x17d78400) flags=read-only, has-min-max\n\t\t\t\t0: 400000000 (0x17d78400)\n                     pixel_rate 0x009f0902 (int64)  : min=200000000 max=200000000 step=1 default=200000000 value=200000000 flags=read-only, has-min-max",
+      "stderr": ""
+    },
+    "v4l2_controls": {
+      "brightness": {
+        "value": 4096,
+        "label": null
+      },
+      "contrast": {
+        "value": 20480,
+        "label": null
+      },
+      "saturation": {
+        "value": 0,
+        "label": null
+      },
+      "white_balance_mode": {
+        "value": 1,
+        "label": "Auto Mode"
+      },
+      "gamma": {
+        "value": 9011,
+        "label": null
+      },
+      "exposure": {
+        "value": 10000,
+        "label": null
+      },
+      "gain": {
+        "value": 1,
+        "label": null
+      },
+      "horizontal_flip": {
+        "value": 0,
+        "label": null
+      },
+      "vertical_flip": {
+        "value": 0,
+        "label": null
+      },
+      "power_line_frequency": {
+        "value": 0,
+        "label": "Disabled"
+      },
+      "white_balance_temperature": {
+        "value": 5000,
+        "label": null
+      },
+      "sharpness": {
+        "value": 8192,
+        "label": null
+      },
+      "backlight_compensation": {
+        "value": 4096,
+        "label": null
+      },
+      "special_effect": {
+        "value": 0,
+        "label": "Normal Mode"
+      },
+      "bsl_mode": {
+        "value": 0,
+        "label": "Normal Mode"
+      },
+      "max_fps": {
+        "value": 60,
+        "label": null
+      },
+      "denoise": {
+        "value": 8192,
+        "label": null
+      },
+      "ae_exposure_upper": {
+        "value": 16666,
+        "label": null
+      },
+      "ae_exposure_max": {
+        "value": 66666,
+        "label": null
+      },
+      "trigger_mode": {
+        "value": 0,
+        "label": "Disabled"
+      },
+      "exposure_mode": {
+        "value": 1,
+        "label": "Auto Mode"
+      },
+      "pan_absolute": {
+        "value": 128,
+        "label": null
+      },
+      "tilt_absolute": {
+        "value": 128,
+        "label": null
+      },
+      "zoom_absolute": {
+        "value": 256,
+        "label": null
+      },
+      "camera_orientation": {
+        "value": 0,
+        "label": "Front"
+      },
+      "camera_sensor_rotation": {
+        "value": 180,
+        "label": null
+      },
+      "vertical_blanking": {
+        "value": 0,
+        "label": null
+      },
+      "horizontal_blanking": {
+        "value": 0,
+        "label": null
+      },
+      "analogue_gain": {
+        "value": 1,
+        "label": null
+      },
+      "link_frequency": {
+        "value": 0,
+        "label": "400000000 0x17d78400"
+      },
+      "pixel_rate": {
+        "value": 200000000,
+        "label": null
+      }
+    },
+    "isp_bypassed": true,
+    "VxGetCurrentExposure": {
+      "returncode": 0,
+      "value": 66618
+    },
+    "VxGetTEVSFirmwareVersion": {
+      "returncode": 0,
+      "value": "25.10.00.01"
+    },
+    "VxGetSensorFirmwareVersion": {
+      "returncode": 0,
+      "value": "25.07.448.00"
+    },
+    "exposure_notes": "V4L2 values are driver control snapshots, potentially cached; exposure and AE limits use microseconds. Auto-exposure can change actual exposure/gain. VxGetCurrentExposure is an SDK snapshot, not tied to a specific saved frame; its raw returned value is retained without inferring units."
+  },
+  "frame_count": 10,
+  "distinct_frames": 1,
+  "frames": [
+    {
+      "received_monotonic_ns": 5037947847542,
+      "received_utc": "2026-09-30T22:57:38.946688+00:00",
+      "read_duration_ms": 66.608444,
+      "received_bytes": 2073600,
+      "file": "frame-000000.pgm",
+      "write_duration_ms": 1.376315,
+      "file_bytes": 2073617,
+      "sha256": "ae3ce13c9db7ca12a92b7a753a6ab938df32654f0415ddb8ae9bc1d63c013175",
+      "pixels": {
+        "min": 255,
+        "max": 255,
+        "mean": 255.0,
+        "std": 0.0,
+        "p1_p50_p99": [
+          255.0,
+          255.0,
+          255.0
+        ],
+        "zero_fraction": 0.0,
+        "saturated_fraction": 1.0
+      }
+    },
+    {
+      "received_monotonic_ns": 5038014461856,
+      "received_utc": "2026-09-30T22:57:39.013299+00:00",
+      "read_duration_ms": 66.068073,
+      "received_bytes": 2073600,
+      "file": "frame-000001.pgm",
+      "write_duration_ms": 1.099352,
+      "file_bytes": 2073617,
+      "sha256": "ae3ce13c9db7ca12a92b7a753a6ab938df32654f0415ddb8ae9bc1d63c013175",
+      "pixels": {
+        "min": 255,
+        "max": 255,
+        "mean": 255.0,
+        "std": 0.0,
+        "p1_p50_p99": [
+          255.0,
+          255.0,
+          255.0
+        ],
+        "zero_fraction": 0.0,
+        "saturated_fraction": 1.0
+      }
+    },
+    {
+      "received_monotonic_ns": 5038081072652,
+      "received_utc": "2026-09-30T22:57:39.079922+00:00",
+      "read_duration_ms": 66.066,
+      "received_bytes": 2073600,
+      "file": "frame-000002.pgm",
+      "write_duration_ms": 1.219685,
+      "file_bytes": 2073617,
+      "sha256": "ae3ce13c9db7ca12a92b7a753a6ab938df32654f0415ddb8ae9bc1d63c013175",
+      "pixels": {
+        "min": 255,
+        "max": 255,
+        "mean": 255.0,
+        "std": 0.0,
+        "p1_p50_p99": [
+          255.0,
+          255.0,
+          255.0
+        ],
+        "zero_fraction": 0.0,
+        "saturated_fraction": 1.0
+      }
+    },
+    {
+      "received_monotonic_ns": 5038147700633,
+      "received_utc": "2026-09-30T22:57:39.146556+00:00",
+      "read_duration_ms": 66.073722,
+      "received_bytes": 2073600,
+      "file": "frame-000003.pgm",
+      "write_duration_ms": 1.193648,
+      "file_bytes": 2073617,
+      "sha256": "ae3ce13c9db7ca12a92b7a753a6ab938df32654f0415ddb8ae9bc1d63c013175",
+      "pixels": {
+        "min": 255,
+        "max": 255,
+        "mean": 255.0,
+        "std": 0.0,
+        "p1_p50_p99": [
+          255.0,
+          255.0,
+          255.0
+        ],
+        "zero_fraction": 0.0,
+        "saturated_fraction": 1.0
+      }
+    },
+    {
+      "received_monotonic_ns": 5038214922262,
+      "received_utc": "2026-09-30T22:57:39.213760+00:00",
+      "read_duration_ms": 66.661166,
+      "received_bytes": 2073600,
+      "file": "frame-000004.pgm",
+      "write_duration_ms": 1.035611,
+      "file_bytes": 2073617,
+      "sha256": "ae3ce13c9db7ca12a92b7a753a6ab938df32654f0415ddb8ae9bc1d63c013175",
+      "pixels": {
+        "min": 255,
+        "max": 255,
+        "mean": 255.0,
+        "std": 0.0,
+        "p1_p50_p99": [
+          255.0,
+          255.0,
+          255.0
+        ],
+        "zero_fraction": 0.0,
+        "saturated_fraction": 1.0
+      }
+    },
+    {
+      "received_monotonic_ns": 5038218524059,
+      "received_utc": "2026-09-30T22:57:39.217338+00:00",
+      "read_duration_ms": 3.058686,
+      "received_bytes": 2073600,
+      "file": "frame-000005.pgm",
+      "write_duration_ms": 1.263686,
+      "file_bytes": 2073617,
+      "sha256": "ae3ce13c9db7ca12a92b7a753a6ab938df32654f0415ddb8ae9bc1d63c013175",
+      "pixels": {
+        "min": 255,
+        "max": 255,
+        "mean": 255.0,
+        "std": 0.0,
+        "p1_p50_p99": [
+          255.0,
+          255.0,
+          255.0
+        ],
+        "zero_fraction": 0.0,
+        "saturated_fraction": 1.0
+      }
+    },
+    {
+      "received_monotonic_ns": 5038347565520,
+      "received_utc": "2026-09-30T22:57:39.346419+00:00",
+      "read_duration_ms": 128.526424,
+      "received_bytes": 2073600,
+      "file": "frame-000006.pgm",
+      "write_duration_ms": 1.261075,
+      "file_bytes": 2073617,
+      "sha256": "ae3ce13c9db7ca12a92b7a753a6ab938df32654f0415ddb8ae9bc1d63c013175",
+      "pixels": {
+        "min": 255,
+        "max": 255,
+        "mean": 255.0,
+        "std": 0.0,
+        "p1_p50_p99": [
+          255.0,
+          255.0,
+          255.0
+        ],
+        "zero_fraction": 0.0,
+        "saturated_fraction": 1.0
+      }
+    },
+    {
+      "received_monotonic_ns": 5038414174723,
+      "received_utc": "2026-09-30T22:57:39.413017+00:00",
+      "read_duration_ms": 66.050759,
+      "received_bytes": 2073600,
+      "file": "frame-000007.pgm",
+      "write_duration_ms": 1.249074,
+      "file_bytes": 2073617,
+      "sha256": "ae3ce13c9db7ca12a92b7a753a6ab938df32654f0415ddb8ae9bc1d63c013175",
+      "pixels": {
+        "min": 255,
+        "max": 255,
+        "mean": 255.0,
+        "std": 0.0,
+        "p1_p50_p99": [
+          255.0,
+          255.0,
+          255.0
+        ],
+        "zero_fraction": 0.0,
+        "saturated_fraction": 1.0
+      }
+    },
+    {
+      "received_monotonic_ns": 5038480812574,
+      "received_utc": "2026-09-30T22:57:39.479641+00:00",
+      "read_duration_ms": 66.089981,
+      "received_bytes": 2073600,
+      "file": "frame-000008.pgm",
+      "write_duration_ms": 1.196482,
+      "file_bytes": 2073617,
+      "sha256": "ae3ce13c9db7ca12a92b7a753a6ab938df32654f0415ddb8ae9bc1d63c013175",
+      "pixels": {
+        "min": 255,
+        "max": 255,
+        "mean": 255.0,
+        "std": 0.0,
+        "p1_p50_p99": [
+          255.0,
+          255.0,
+          255.0
+        ],
+        "zero_fraction": 0.0,
+        "saturated_fraction": 1.0
+      }
+    },
+    {
+      "received_monotonic_ns": 5038547427759,
+      "received_utc": "2026-09-30T22:57:39.546256+00:00",
+      "read_duration_ms": 66.080611,
+      "received_bytes": 2073600,
+      "file": "frame-000009.pgm",
+      "write_duration_ms": 1.247149,
+      "file_bytes": 2073617,
+      "sha256": "ae3ce13c9db7ca12a92b7a753a6ab938df32654f0415ddb8ae9bc1d63c013175",
+      "pixels": {
+        "min": 255,
+        "max": 255,
+        "mean": 255.0,
+        "std": 0.0,
+        "p1_p50_p99": [
+          255.0,
+          255.0,
+          255.0
+        ],
+        "zero_fraction": 0.0,
+        "saturated_fraction": 1.0
+      }
+    }
+  ],
+  "validation": {
+    "fully_saturated_frames": 10,
+    "uniform_frames": 10,
+    "duplicate_frames": 9,
+    "host_delivery_below_requested": true
+  },
+  "capture_completed_utc": "2026-09-30T22:57:40.002956+00:00"
+}
