@@ -6,6 +6,7 @@ Run on its own to save one RAW8 frame: python camera_API.py
 """
 from pathlib import Path
 import subprocess
+import re
 
 import vizion_cm5  # noqa: F401  CM5 workaround, must come before pyvizionsdk
 import numpy as np
@@ -13,7 +14,7 @@ import pyvizionsdk
 from pyvizionsdk import VX_CAPTURE_RESULT, VX_IMAGE_FORMAT
 
 VX_IMAGE_FORMAT_RAW8 = VX_IMAGE_FORMAT.VX_IMAGE_FORMAT_NONE
-_raw8 = {}    # id(vxcam) -> RAW8 format set
+_raw8 = {}    # id(vxcam) -> (RAW8 format, capture node)
 _stream = {}  # id(vxcam) -> v4l2-ctl streaming it
 
 
@@ -21,28 +22,49 @@ def __getattr__(name):  # Everything else is the SDK's own
     return getattr(pyvizionsdk, name)
 
 
+def _camera_route():
+    """Media node numbers can change at boot; find the TEVS capture pipeline."""
+    for media in sorted(Path("/dev").glob("media*")):
+        topology = subprocess.run(["media-ctl", "-d", str(media), "-p"],
+                                  capture_output=True, text=True, check=True).stdout
+        sensor = re.search(r"entity \d+: (tevs [^\n(]+) \(", topology)
+        if sensor is None or "rp1-cfe-csi2_ch0" not in topology:
+            continue
+        video = subprocess.run(
+            ["media-ctl", "-d", str(media), "-e", "rp1-cfe-csi2_ch0"],
+            capture_output=True, text=True, check=True).stdout.strip()
+        return str(media), sensor[1].strip(), video
+    raise RuntimeError("No TEVS capture pipeline found")
+
+
 def VxSetFormat(vxcam, fmt):
     _raw8.pop(id(vxcam), None)
     if fmt.format != VX_IMAGE_FORMAT_RAW8:
         return pyvizionsdk.VxSetFormat(vxcam, fmt)
-    _raw8[id(vxcam)] = fmt
+    media, sensor, video = _camera_route()
     size = f"fmt:Y8_1X8/{fmt.width}x{fmt.height}"
-    for pad in (f'"tevs 10-0048":0 [{size}@1/{fmt.framerate} field:none]',
+    for pad in (f'"{sensor}":0 [{size}@1/{fmt.framerate} field:none]',
                 f'"csi2":0 [{size} field:none]', f'"csi2":4 [{size} field:none]'):
-        subprocess.run(["media-ctl", "-d", "/dev/media0", "-V", pad])
+        subprocess.run(["media-ctl", "-d", media, "-V", pad], check=True)
+    _raw8[id(vxcam)] = fmt, video
     return 0
 
 
 def VxStartStreaming(vxcam):
-    fmt = _raw8.get(id(vxcam))
-    if fmt is None:
+    raw8 = _raw8.get(id(vxcam))
+    if raw8 is None:
         return pyvizionsdk.VxStartStreaming(vxcam)
-    _stream[id(vxcam)] = subprocess.Popen(
-        ["v4l2-ctl", "-d", "/dev/video0", "--stream-mmap", "--stream-to=-",
+    fmt, video = raw8
+    process = subprocess.Popen(
+        ["v4l2-ctl", "-d", video, "--stream-mmap", "--stream-to=-",
          f"--set-fmt-video=width={fmt.width},height={fmt.height},pixelformat=GREY"],
         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-        start_new_session=True)  # Ctrl+C in the terminal must not cut a frame in half
-    _stream[id(vxcam)].stdout.read(fmt.width * fmt.height)  # First frame is blank
+        start_new_session=True)  # Ctrl+C must not cut a frame in half
+    _stream[id(vxcam)] = process
+    first = process.stdout.read(fmt.width * fmt.height)  # First frame is blank
+    if len(first) != fmt.width * fmt.height:
+        VxStopStreaming(vxcam)
+        raise RuntimeError("RAW8 streaming did not produce a complete startup frame")
     return 0
 
 
@@ -56,7 +78,10 @@ def VxGetImage(vxcam, timeout, fmt):
 def VxStopStreaming(vxcam):
     if id(vxcam) not in _stream:
         return pyvizionsdk.VxStopStreaming(vxcam)
-    _stream.pop(id(vxcam)).kill()
+    process = _stream.pop(id(vxcam))
+    process.kill()
+    process.wait()
+    process.stdout.close()
     return 0
 
 

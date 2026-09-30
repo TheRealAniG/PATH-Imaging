@@ -1,0 +1,84 @@
+{
+  "format": "RAW8",
+  "container": "PGM",
+  "width": 1920,
+  "height": 1080,
+  "requested_fps": 60,
+  "sensor_frame_interval": "1/60",
+  "isp_bypassed": true,
+  "frame_count": 10,
+  "capture_elapsed_seconds": 0.74,
+  "note": "Elapsed time includes startup/warmup and disk writes; sustained 60 fps was not measured.",
+  "frames": [
+    {
+      "file": "frame-000000.pgm",
+      "sha256": "4ce8501eeec6c38f0a922d6d1a7c17e510dd1c6c20e80c0bffa75172c15bb6cb",
+      "min": 12,
+      "max": 200,
+      "mean": 116.81657648533951
+    },
+    {
+      "file": "frame-000001.pgm",
+      "sha256": "4b695f74784caf12bc7e68bc2908482e4f88a23886966af278fec16e4014d108",
+      "min": 14,
+      "max": 210,
+      "mean": 121.96717930169753
+    },
+    {
+      "file": "frame-000002.pgm",
+      "sha256": "663300a8ec32f8b9937a38d7c29ffb0e5b55921a1856f205cc68883221e5edf6",
+      "min": 14,
+      "max": 210,
+      "mean": 121.8820920138889
+    },
+    {
+      "file": "frame-000003.pgm",
+      "sha256": "1726252c88f9ca9d086c776f84b7b3af5fa726bf69c748c8bd70aaae2ed04648",
+      "min": 14,
+      "max": 209,
+      "mean": 121.77114969135802
+    },
+    {
+      "file": "frame-000004.pgm",
+      "sha256": "bac28c9076de0487de7aadbab723d1deb01ff8a975ad7e2f9dad68bf5ccf751c",
+      "min": 13,
+      "max": 209,
+      "mean": 121.98540219907407
+    },
+    {
+      "file": "frame-000005.pgm",
+      "sha256": "3c0b69ecee6aa0cf6a41756b9b5d8e16148137ddb80ae1c75f430ffdd9578a5a",
+      "min": 14,
+      "max": 214,
+      "mean": 122.24772280092593
+    },
+    {
+      "file": "frame-000006.pgm",
+      "sha256": "648787b9a2dc00ac02bf178325708a793b40955289354c722dc5e01d3e0b3c91",
+      "min": 13,
+      "max": 212,
+      "mean": 122.20211564429012
+    },
+    {
+      "file": "frame-000007.pgm",
+      "sha256": "f455aa8ed8928b306f1d1c3f95e134a37a54c479653a275003153891084f276f",
+      "min": 14,
+      "max": 211,
+      "mean": 121.72345920138889
+    },
+    {
+      "file": "frame-000008.pgm",
+      "sha256": "dbcc11de8413e542b40350958fdd330d5b3f06c51cd39d2cbe2a9b6308ab55bb",
+      "min": 14,
+      "max": 209,
+      "mean": 121.73915075231481
+    },
+    {
+      "file": "frame-000009.pgm",
+      "sha256": "95a7aa3fe273549d2c787d9f190ea77cec0ba47a8405c715f95141a39cbfd079",
+      "min": 12,
+      "max": 207,
+      "mean": 121.74542727623457
+    }
+  ]
+}

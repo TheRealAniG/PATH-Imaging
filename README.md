@@ -27,6 +27,16 @@ stops and closes the camera. No desktop or GTK is needed. Defaults to
 `--height`, and `--fps`; add `--raw8` for sensor RAW8 or `--output-dir` for a
 new output directory. Disk writes may reduce the rate of saved frames.
 
+To save exactly ten RAW8 frames at 1920×1080 using the camera's 60 fps mode:
+
+```bash
+uv run scripts/capture_raw8_1080p60.py
+```
+
+This saves unprocessed 8-bit sensor values in lossless PGM files under a new
+`captures/raw8-.../` directory. It skips the startup frame and closes the camera
+after the tenth saved image. Disk writes may reduce the saved-frame rate.
+
 Captured PGM images under `captures/` are tracked through Git LFS. Install
 `git-lfs` and run `git lfs install` before committing captures. Git stores
 pointers; LFS stores the image data. After cloning, `git lfs pull` downloads the
