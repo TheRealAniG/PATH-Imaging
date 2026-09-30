@@ -43,10 +43,14 @@ def main():
     remote = git("ls-remote", "--heads", "origin", f"refs/heads/{branch}")
     if not remote or remote.split()[0] != commit or git("rev-parse", "HEAD") != commit:
         raise RuntimeError("Could not verify pushed commit; keeping local image data")
-    if captures:
-        # The LFS server confirms these objects exist or uploads any missing ones.
+    release_oids = {oid for path, pointer, oid in captures
+                    if path.read_bytes() != pointer or
+                    (Path(media) / oid[:2] / oid[2:4] / oid).is_file()}
+    if release_oids:
+        # Verify only objects with local data to release. Already-released
+        # pointers have no local object for git-lfs to upload again.
         subprocess.run(["git", "lfs", "push", "--object-id", "origin",
-                        *sorted({oid for _, _, oid in captures})], check=True)
+                        *sorted(release_oids)], check=True)
     # These settings apply to all worktrees sharing this repository's config.
     subprocess.run(["git", "config", "--local", "filter.lfs.smudge",
                     "git-lfs smudge --skip -- %f"], check=True)
