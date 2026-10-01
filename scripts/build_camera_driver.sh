@@ -27,8 +27,8 @@ if ! git -C "$build/source" cat-file -e "$revision^{commit}" 2>/dev/null; then
     git -C "$build/source" fetch origin "$branch"
 fi
 git -C "$build/source" checkout --force --detach "$revision"
-# Adds AR0822 RAW8 (Y8_1X8); UYVY stays the default. Written and tested on 6.18.
-git -C "$build/source" apply "$repo_root/patches/tevs-raw8.patch"
+# Adds AR0822 RAW8 (Y8_1X8) and RAW10 (Y10_1X10); UYVY stays the default. Written on 6.18.
+git -C "$build/source" apply "$repo_root/patches/tevs-raw.patch"
 make -C "$headers" M="$build/source/drivers/media/i2c/tevs" CONFIG_VIDEO_TEVS=m modules -j2
 cpp -nostdinc -undef -D__DTS__ -x assembler-with-cpp -I "$includes" \
     "$build/source/arch/arm64/boot/dts/overlays/tevs-rpi22-overlay.dts" > "$build/tevs-rpi22.dts"

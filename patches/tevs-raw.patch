@@ -1,13 +1,14 @@
 diff --git a/drivers/media/i2c/tevs/tevs_main.c b/drivers/media/i2c/tevs/tevs_main.c
-index 0929aa2..5030051 100644
+index 0929aa2..e48f762 100644
 --- a/drivers/media/i2c/tevs/tevs_main.c
 +++ b/drivers/media/i2c/tevs/tevs_main.c
-@@ -297,6 +297,12 @@
+@@ -297,6 +297,13 @@
  #define TOTAL_MICROSEC_PERSEC				(1000000)
  
  #define TEVS_IMG_FORMAT_UYVY				(0x50)
 +#define TEVS_IMG_FORMAT_Y8				(0x52)	/* AP1302 YUV_JFIF | YUV_400 */
 +#define TEVS_IMG_FORMAT_RAW8_SENSOR			(0x80)	/* AP1302 RAW8 | RAW_SENSOR */
++#define TEVS_IMG_FORMAT_RAW10_SENSOR			(0x90)	/* AP1302 RAW10 | RAW_SENSOR */
 +
 +static bool bypass_isp = true;
 +module_param(bypass_isp, bool, 0644);
@@ -15,7 +16,7 @@ index 0929aa2..5030051 100644
  
  #define TEVS_LINK_FREQUENCY_DEFAULT			400000000ull
  #define TEVS_PIXEL_RATE_DEFAULT				200000000ull
-@@ -393,6 +399,31 @@ struct tevs {
+@@ -393,6 +400,35 @@ struct tevs {
  	struct v4l2_ctrl *trigger;
  };
  
@@ -24,6 +25,8 @@ index 0929aa2..5030051 100644
 +	if (tevs->fmt.code == MEDIA_BUS_FMT_Y8_1X8)
 +		return bypass_isp ? TEVS_IMG_FORMAT_RAW8_SENSOR :
 +				    TEVS_IMG_FORMAT_Y8;
++	if (tevs->fmt.code == MEDIA_BUS_FMT_Y10_1X10)
++		return TEVS_IMG_FORMAT_RAW10_SENSOR;
 +	return TEVS_IMG_FORMAT_UYVY;
 +}
 +
@@ -31,6 +34,8 @@ index 0929aa2..5030051 100644
 +{
 +	if (tevs->fmt.code == MEDIA_BUS_FMT_Y8_1X8)
 +		return (MIPI_CSI2_DT_RAW8 << 2) | tevs->vc_id;
++	if (tevs->fmt.code == MEDIA_BUS_FMT_Y10_1X10)
++		return (MIPI_CSI2_DT_RAW10 << 2) | tevs->vc_id;
 +	return tevs->vc_id;
 +}
 +
@@ -47,7 +52,7 @@ index 0929aa2..5030051 100644
  static const struct regmap_config tevs_regmap_config = {
  	.reg_bits = 16,
  	.val_bits = 8,
-@@ -604,7 +635,7 @@ static int tevs_set_stream(struct v4l2_subdev *sub_dev, int enable)
+@@ -604,7 +640,7 @@ static int tevs_set_stream(struct v4l2_subdev *sub_dev, int enable)
  					.height);
  			cci_write(tevs->regmap,
  				  HOST_COMMAND_ISP_CTRL_PREVIEW_FORMAT,
@@ -56,7 +61,7 @@ index 0929aa2..5030051 100644
  			cci_write(tevs->regmap,
  				  HOST_COMMAND_ISP_CTRL_PREVIEW_HINF_CTRL,
  				  0x10 | (tevs->continuous_clock << 5) |
-@@ -612,7 +643,7 @@ static int tevs_set_stream(struct v4l2_subdev *sub_dev, int enable)
+@@ -612,7 +648,7 @@ static int tevs_set_stream(struct v4l2_subdev *sub_dev, int enable)
  				  NULL);
  			cci_write(tevs->regmap,
  				  HOST_COMMAND_ISP_CTRL_PREVIEW_MIPI_CTRL,
@@ -65,7 +70,7 @@ index 0929aa2..5030051 100644
  			cci_write(tevs->regmap,
  				  HOST_COMMAND_ISP_CTRL_PREVIEW_SENSOR_MODE,
  				  tevs_sensor_table[tevs->selected_sensor]
-@@ -685,7 +716,7 @@ static int tevs_enum_frame_size(struct v4l2_subdev *sub_dev,
+@@ -685,7 +721,7 @@ static int tevs_enum_frame_size(struct v4l2_subdev *sub_dev,
  	     tevs_sensor_table[tevs->selected_sensor].res_list_size))
  		return -EINVAL;
  
@@ -74,7 +79,7 @@ index 0929aa2..5030051 100644
  		return -EINVAL;
  
  	dev_dbg(sub_dev->dev, "%s(), index [%u]\n", __func__, fse->index);
-@@ -807,7 +838,8 @@ static int tevs_set_fmt(struct v4l2_subdev *sub_dev,
+@@ -807,7 +843,8 @@ static int tevs_set_fmt(struct v4l2_subdev *sub_dev,
  		tevs_sensor_table[tevs->selected_sensor].res_list[i].width;
  	mbus_fmt->height =
  		tevs_sensor_table[tevs->selected_sensor].res_list[i].height;
@@ -84,7 +89,7 @@ index 0929aa2..5030051 100644
  	mbus_fmt->field = V4L2_FIELD_NONE;
  	mbus_fmt->colorspace = V4L2_COLORSPACE_SRGB;
  	mbus_fmt->ycbcr_enc = V4L2_MAP_YCBCR_ENC_DEFAULT(mbus_fmt->colorspace);
-@@ -943,7 +975,8 @@ static int tevs_get_frame_desc(struct v4l2_subdev *sub_dev, unsigned int pad,
+@@ -943,9 +980,11 @@ static int tevs_get_frame_desc(struct v4l2_subdev *sub_dev, unsigned int pad,
  	fd->entry[0].pixelcode = tevs->fmt.code;
  	fd->entry[0].bus.csi2.vc = 0;
  	fd->entry[0].bus.csi2.dt =
@@ -92,9 +97,13 @@ index 0929aa2..5030051 100644
 +		(tevs->fmt.code == MEDIA_BUS_FMT_SGRBG8_1X8 ||
 +		 tevs->fmt.code == MEDIA_BUS_FMT_Y8_1X8) ?
  			MIPI_CSI2_DT_RAW8 :
- 		tevs->fmt.code == MEDIA_BUS_FMT_SGRBG10_1X10 ?
+-		tevs->fmt.code == MEDIA_BUS_FMT_SGRBG10_1X10 ?
++		(tevs->fmt.code == MEDIA_BUS_FMT_SGRBG10_1X10 ||
++		 tevs->fmt.code == MEDIA_BUS_FMT_Y10_1X10) ?
  			MIPI_CSI2_DT_RAW10 :
-@@ -1285,13 +1318,13 @@ static int tevs_set_bsl_mode(struct tevs *tevs, s32 mode)
+ 		tevs->fmt.code == MEDIA_BUS_FMT_SGRBG12_1X12 ?
+ 			MIPI_CSI2_DT_RAW12 :
+@@ -1285,13 +1324,13 @@ static int tevs_set_bsl_mode(struct tevs *tevs, s32 mode)
  		}
  
  		cci_write(tevs->regmap, HOST_COMMAND_ISP_CTRL_PREVIEW_FORMAT,
@@ -110,7 +119,7 @@ index 0929aa2..5030051 100644
  
  		break;
  	case TEVS_BSL_MODE_FLASH_IDX:
-@@ -1996,7 +2029,7 @@ static int tevs_power_on(struct tevs *tevs)
+@@ -1996,7 +2035,7 @@ static int tevs_power_on(struct tevs *tevs)
  
  		ret += cci_write(tevs->regmap,
  				 HOST_COMMAND_ISP_CTRL_PREVIEW_FORMAT,
@@ -119,7 +128,7 @@ index 0929aa2..5030051 100644
  		ret += cci_write(tevs->regmap,
  				 HOST_COMMAND_ISP_CTRL_PREVIEW_HINF_CTRL,
  				 0x10 | (tevs->continuous_clock << 5) |
-@@ -2004,7 +2037,7 @@ static int tevs_power_on(struct tevs *tevs)
+@@ -2004,7 +2043,7 @@ static int tevs_power_on(struct tevs *tevs)
  				 NULL);
  		ret += cci_write(tevs->regmap,
  				 HOST_COMMAND_ISP_CTRL_PREVIEW_MIPI_CTRL,
@@ -129,14 +138,15 @@ index 0929aa2..5030051 100644
  			goto error;
  	}
 diff --git a/drivers/media/i2c/tevs/tevs_tbls.h b/drivers/media/i2c/tevs/tevs_tbls.h
-index f3a12f4..b54e9cd 100644
+index f3a12f4..aaf9c21 100644
 --- a/drivers/media/i2c/tevs/tevs_tbls.h
 +++ b/drivers/media/i2c/tevs/tevs_tbls.h
-@@ -350,6 +350,7 @@ static struct resolution ar0821_res_list[] = {
+@@ -350,6 +350,8 @@ static struct resolution ar0821_res_list[] = {
  /* AR0822 default setting for 4 data lanes and data frequency 800 MHz */
  static u32 ar0822_code_list[] = {
  	MEDIA_BUS_FMT_UYVY8_1X16,
 +	MEDIA_BUS_FMT_Y8_1X8,
++	MEDIA_BUS_FMT_Y10_1X10,
  };
  
  static u16 ar0822_framerates_640x480[] = { 60, 30, 20, 15, 10, 5 };
