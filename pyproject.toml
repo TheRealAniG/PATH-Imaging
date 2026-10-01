@@ -2,4 +2,13 @@
 name = "path-imaging"
 version = "0.1.0"
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "pyvizionsdk>=26.9.1",
+]
+
+[tool.uv.sources]
+pyvizionsdk = { index = "vizionsdk" }
+
+[[tool.uv.index]]
+name = "vizionsdk"
+url = "https://pypi.vizionsdk.com/root/pyvizionsdk/+simple/"
