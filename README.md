@@ -13,10 +13,11 @@ the camera's ISP bypassed.
 | `vizion_cm5.py`, `scripts/cm5_board_id_shim.c` | Workaround so pyvizionsdk finds the camera on a CM5. |
 | `patches/tevs-raw.patch` | TEVS driver change that adds RAW8 and RAW10. |
 | `scripts/build_camera_driver.sh`, `scripts/install_camera_driver.sh` | Build and install the patched driver. |
+| `scripts/setup_pi_user.sh` | New user on the shared Pi: steps 3–11 of the team setup guide. |
 
 ### Run
 
-From the repo folder, on the Pi desktop:
+After the setup below, from the repo folder in a terminal on the Pi desktop:
 
 ```bash
 uv run python camera_API.py   # 10 s live RAW10, saves the last frame as raw10.pgm (16-bit, max 1023)
@@ -71,89 +72,127 @@ process only, and enables the CSI-2 capture link, which is off after every boot.
 other SDK scripts unchanged with `python vizion_cm5.py script.py`. Remove once
 TechNexion supports the CM5.
 
-## New user on the shared Pi
+## Quick start A: the shared team Pi
 
-Automates steps 3–11 of the team "Raspberry Pi Setup" guide (git identity, SSH key,
-`.bashrc`, worktree, uv environment). Safe to re-run.
+The patched driver and boot config are already installed on the shared Pi, so you only
+need the code and a Python environment. If you have no worktree yet, first follow the
+team "Raspberry Pi Setup" guide, or let the script do steps 3–11 for you:
 
 ```bash
-cd /opt/path/PATH-Imaging
+cd /opt/path/worktrees/tian    # the script lives here until tian-dev is merged into main
 bash scripts/setup_pi_user.sh <username> "Your Name" <github-email>
 ```
 
-Still manual: `passwd`, then add the printed SSH key on GitHub and test with
-`ssh -T git@github.com`.
-
-## Setup
-
-### 1. Python environment
-
-`uv sync` installs `pyvizionsdk` (from TechNexion's index, declared in `pyproject.toml`).
-The live window also needs the system GTK/GStreamer bindings, which a uv venv only
-sees if it is created with system packages, once per worktree:
+It prints an SSH key to add on GitHub (Settings → SSH and GPG keys); test with
+`ssh -T git@github.com`. Then bring this branch into your own branch and run:
 
 ```bash
-sudo apt install python3-gi gir1.2-gstreamer-1.0 gstreamer1.0-plugins-base \
-  gstreamer1.0-plugins-good v4l-utils
-uv venv --system-site-packages --allow-existing
+cd /opt/path/worktrees/<username>
+git fetch
+git merge origin/tian-dev                          # adds the camera code to your branch
+uv venv --system-site-packages --allow-existing    # once: lets uv see the system GTK/GStreamer
+uv sync                                            # installs pyvizionsdk
+uv run python camera_API.py
+```
+
+You can't `git switch tian-dev` in your worktree while it is checked out in Tian's;
+merging (or `git switch -c <username>-camera origin/tian-dev`) avoids that. You also need
+the `video` and `i2c` groups: if `id` doesn't list both, run
+`sudo usermod -aG video,i2c $USER` and log out and back in. The camera can only be used
+by one program at a time, so check nobody else is streaming.
+
+## Quick start B: your own Raspberry Pi 5 / CM5
+
+For a fresh **Raspberry Pi OS 64-bit (Debian 13)** with kernel **6.18** (`uname -r`;
+6.12 is also supported by the build script, but the patch was only tested on 6.18).
+Steps 4 and 5 need `sudo`; step 5 needs a reboot.
+
+**1. Packages** (kernel headers must match `uname -r`; if apt installs newer headers than
+the running kernel, run `sudo apt full-upgrade`, reboot, and repeat):
+
+```bash
+sudo apt update
+sudo apt install git build-essential device-tree-compiler linux-headers-rpi-2712 v4l-utils \
+  python3-gi gir1.2-gstreamer-1.0 gstreamer1.0-plugins-base gstreamer1.0-plugins-good
+curl -LsSf https://astral.sh/uv/install.sh | sh    # then open a new terminal
+```
+
+**2. Code and Python environment:**
+
+```bash
+git clone -b tian-dev git@github.com:TheRealAniG/PATH-Imaging.git   # needs an SSH key on GitHub
+cd PATH-Imaging
+uv venv --system-site-packages
 uv sync
-sudo usermod -aG video,i2c "$USER"   # then log out and back in
 ```
 
-The `i2c` group is needed for the SDK's camera controls (exposure, gain, …).
+Without an SSH key on that Pi, clone `https://github.com/TheRealAniG/PATH-Imaging.git`
+instead and use a GitHub personal access token as the password.
 
-### 2. Build and install the TEVS driver
+**3. Permissions:** `sudo usermod -aG video,i2c $USER`, then log out and back in. `video`
+gives camera access; `i2c` is needed by the SDK's camera controls (exposure, gain, …).
 
-The build script checks out pinned TechNexion source for the running kernel
-(`6611bfe7…` for 6.12, `c681dd09…` for 6.18), applies `patches/tevs-raw.patch`, and
-builds into `.camera-driver/` (git-ignored). The patch was written and tested on 6.18.
-Install `build-essential`, `git`, `device-tree-compiler` and headers matching
-`uname -r` first if missing.
+**4. Build and install the patched driver:**
 
 ```bash
-bash scripts/build_camera_driver.sh
-sudo bash scripts/install_camera_driver.sh
+bash scripts/build_camera_driver.sh          # downloads TechNexion's source, applies patches/tevs-raw.patch
+sudo bash scripts/install_camera_driver.sh   # installs tevs.ko + the tevs-rpi22 overlay, loads the driver
 ```
 
-The install script reloads the driver in place. Repeat both after every kernel update:
-the driver is built for one kernel version. Check that the patched driver is loaded
-with `modinfo tevs | grep bypass_isp`.
+The driver is built for one kernel version: repeat both commands after every kernel
+update, or the camera disappears. Check with `modinfo tevs | grep bypass_isp`.
 
-### 3. Configure the camera port (first time only)
-
-**CM5 IO Board:** CAM/DISP 1 requires **both J6 jumpers** fitted as shown on the
-silkscreen; they route the camera's I²C signals. Power down before fitting jumpers or
-reseating the ribbon. See the
-[official CM5 camera instructions](https://www.raspberrypi.com/documentation/computers/compute-module.html#attach-a-camera-module).
+**5. Boot configuration (first time only).** Power down and connect the camera ribbon. On a
+**CM5 IO Board**, the connector you use needs **both of its J6 jumpers** fitted as shown on
+the silkscreen (they route the camera's I²C); see the
+[CM5 camera instructions](https://www.raspberrypi.com/documentation/computers/compute-module.html#attach-a-camera-module).
 Missing jumpers can cause `pca953x ... error -121` followed by
-`tevs ... supplier ...0027 not ready`.
-
-Back up and edit the boot configuration:
+`tevs ... supplier ...0027 not ready`. Then back up and edit the boot config:
 
 ```bash
 sudo cp -a /boot/firmware/config.txt "/boot/firmware/config.txt.before-tevs-$(date +%Y%m%d-%H%M%S)"
 sudo nano /boot/firmware/config.txt
 ```
 
-Change `camera_auto_detect=1` to `camera_auto_detect=0`. Comment out
-`include config_vc-mipi-driver-bcm2712.txt` (its Vision Components overlays conflict).
-Under the final `[all]` section add:
+Set `camera_auto_detect=0`. If there is an `include config_vc-mipi-driver-bcm2712.txt`
+line, comment it out (its Vision Components overlays conflict). Under the final `[all]`
+section, add **one** line for the connector the camera is on:
 
 ```ini
-# CAM/DISP 1:
-dtoverlay=tevs-rpi22
-# For CAM/DISP 0 instead, use: dtoverlay=tevs-rpi22,cam0
+dtoverlay=tevs-rpi22,cam0    # CAM/DISP 0 (what the shared team Pi uses)
+# dtoverlay=tevs-rpi22       # CAM/DISP 1 instead
 ```
 
-Then `sudo reboot`. To undo, restore the timestamped backup and reboot.
+Save, then `sudo reboot`. To undo, restore the timestamped backup and reboot.
 
-### Troubleshooting
+**6. Check and run:**
 
-- **No camera found:** `sudo dmesg | grep -iE 'tevs|csi|i2c'` should end with
-  `tevs 10-0048: probe success`; `media-ctl -d /dev/media0 -p` should list a
-  `tevs 10-0048` entity. After a kernel update, rebuild and reinstall the driver.
-- **No or incomplete frames:** another program holds the camera, often a run paused
-  with Ctrl+Z. Check `jobs` and end it.
+```bash
+dmesg | grep tevs                 # should include: tevs 10-0048: probe success
+uv run python camera_API.py       # 10 s live RAW10 window, saves raw10.pgm
+```
+
+On a regular Pi 5 (not a CM5), `vizion_cm5` does nothing and the J6 jumpers don't apply.
+
+## Troubleshooting
+
+- **No camera found** (`camera_API.py` fails with `StopIteration` or an empty camera list): `dmesg | grep -iE 'tevs|csi|i2c'` should include
+  `tevs 10-0048: probe success`, and `media-ctl -d /dev/media0 -p` should list a
+  `tevs 10-0048` entity. After a kernel update, rebuild and reinstall the driver (step 4).
+- **`No module named gi` / no window:** the uv venv can't see system packages; run
+  `uv venv --system-site-packages --allow-existing` then `uv sync`.
+- **`Permission denied` on `/dev/video0` or `/dev/i2c-10`:** add the `video` and `i2c`
+  groups (step 3) and log out and back in.
+- **`uv sync` fails with `Permission denied` in `/opt/path/uv-cache`** (shared Pi only):
+  someone ran `uv` with `sudo`; fix with `sudo chmod -R g+w /opt/path/uv-cache`.
+- **No or incomplete frames:** another program holds the camera, often a run paused with
+  Ctrl+Z. Check `jobs` and end it; quit with Ctrl+C instead.
+- **RAW10 fails but UYVY works:** the stock driver is loaded, not the patched one;
+  `modinfo tevs | grep bypass_isp` prints nothing. Redo step 4.
+- **Camera on a different `/dev/media*` or `/dev/video*`:** `camera_API.py` assumes
+  `/dev/media0` and `/dev/video0` (true when the camera is the only one). Find yours with
+  `for m in /dev/media*; do media-ctl -d $m -p | grep -q tevs && echo $m && media-ctl -d $m -e rp1-cfe-csi2_ch0; done`
+  and edit the two paths in `camera_API.py`.
 
 ## References
 
