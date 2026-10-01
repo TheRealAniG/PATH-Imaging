@@ -40,7 +40,8 @@ def VxStartStreaming(vxcam):
     _stream[id(vxcam)] = subprocess.Popen(
         ["v4l2-ctl", "-d", "/dev/video0", "--stream-mmap", "--stream-to=-",
          f"--set-fmt-video=width={fmt.width},height={fmt.height},pixelformat=GREY"],
-        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+        start_new_session=True)  # Ctrl+C in the terminal must not cut a frame in half
     _stream[id(vxcam)].stdout.read(fmt.width * fmt.height)  # First frame is blank
     return 0
 
