@@ -1,152 +1,218 @@
 diff --git a/drivers/media/i2c/tevs/tevs_main.c b/drivers/media/i2c/tevs/tevs_main.c
-index 0929aa2..e48f762 100644
+index 0929aa2..16bad71 100644
 --- a/drivers/media/i2c/tevs/tevs_main.c
 +++ b/drivers/media/i2c/tevs/tevs_main.c
-@@ -297,6 +297,13 @@
+@@ -297,6 +297,10 @@
  #define TOTAL_MICROSEC_PERSEC				(1000000)
  
  #define TEVS_IMG_FORMAT_UYVY				(0x50)
-+#define TEVS_IMG_FORMAT_Y8				(0x52)	/* AP1302 YUV_JFIF | YUV_400 */
-+#define TEVS_IMG_FORMAT_RAW8_SENSOR			(0x80)	/* AP1302 RAW8 | RAW_SENSOR */
-+#define TEVS_IMG_FORMAT_RAW10_SENSOR			(0x90)	/* AP1302 RAW10 | RAW_SENSOR */
-+
-+static bool bypass_isp = true;
-+module_param(bypass_isp, bool, 0644);
-+MODULE_PARM_DESC(bypass_isp, "Y8 requests sensor RAW8 (0x80, default) instead of ISP Y-only (0x52, returns black frames on AR0822 fw 25.10.0.1)");
++#define TEVS_IMG_FORMAT_RAW8				(0x80)
++#define TEVS_IMG_FORMAT_RAW10				(0x90)
++#define TEVS_IMG_FORMAT_RAW12				(0xA0)
++#define TEVS_IMG_FORMAT_RAW16				(0xB0)
  
  #define TEVS_LINK_FREQUENCY_DEFAULT			400000000ull
  #define TEVS_PIXEL_RATE_DEFAULT				200000000ull
-@@ -393,6 +400,35 @@ struct tevs {
+@@ -393,6 +397,45 @@ struct tevs {
  	struct v4l2_ctrl *trigger;
  };
  
-+static u16 tevs_preview_format(struct tevs *tevs)
++static bool tevs_is_raw_code(u32 code)
 +{
-+	if (tevs->fmt.code == MEDIA_BUS_FMT_Y8_1X8)
-+		return bypass_isp ? TEVS_IMG_FORMAT_RAW8_SENSOR :
-+				    TEVS_IMG_FORMAT_Y8;
-+	if (tevs->fmt.code == MEDIA_BUS_FMT_Y10_1X10)
-+		return TEVS_IMG_FORMAT_RAW10_SENSOR;
-+	return TEVS_IMG_FORMAT_UYVY;
++	return code == MEDIA_BUS_FMT_SGRBG8_1X8 ||
++	       code == MEDIA_BUS_FMT_SGRBG10_1X10 ||
++	       code == MEDIA_BUS_FMT_SGRBG12_1X12 ||
++	       code == MEDIA_BUS_FMT_SGRBG16_1X16;
 +}
 +
-+static u16 tevs_preview_mipi_ctrl(struct tevs *tevs)
++/* Return @code if the sensor lists it, else the sensor's default code. */
++static u32 tevs_supported_code(struct tevs *tevs, u32 code)
 +{
-+	if (tevs->fmt.code == MEDIA_BUS_FMT_Y8_1X8)
-+		return (MIPI_CSI2_DT_RAW8 << 2) | tevs->vc_id;
-+	if (tevs->fmt.code == MEDIA_BUS_FMT_Y10_1X10)
-+		return (MIPI_CSI2_DT_RAW10 << 2) | tevs->vc_id;
-+	return tevs->vc_id;
-+}
-+
-+static bool tevs_code_supported(struct tevs *tevs, u32 code)
-+{
++	const struct sensor_info *info = &tevs_sensor_table[tevs->selected_sensor];
 +	int i;
 +
-+	for (i = 0; i < tevs_sensor_table[tevs->selected_sensor].code_list_size; i++)
-+		if (tevs_sensor_table[tevs->selected_sensor].code_list[i] == code)
-+			return true;
-+	return false;
++	for (i = 0; i < info->code_list_size; i++)
++		if (info->code_list[i] == code)
++			return code;
++
++	return info->code_list[0];
 +}
++
++/* ISP preview output format register value for a media bus code. */
++static u16 tevs_isp_format(u32 code)
++{
++	switch (code) {
++	case MEDIA_BUS_FMT_SGRBG8_1X8:
++		return TEVS_IMG_FORMAT_RAW8;
++	case MEDIA_BUS_FMT_SGRBG10_1X10:
++		return TEVS_IMG_FORMAT_RAW10;
++	case MEDIA_BUS_FMT_SGRBG12_1X12:
++		return TEVS_IMG_FORMAT_RAW12;
++	case MEDIA_BUS_FMT_SGRBG16_1X16:
++		return TEVS_IMG_FORMAT_RAW16;
++	default:
++		return TEVS_IMG_FORMAT_UYVY;
++	}
++}
++
 +
  static const struct regmap_config tevs_regmap_config = {
  	.reg_bits = 16,
  	.val_bits = 8,
-@@ -604,7 +640,7 @@ static int tevs_set_stream(struct v4l2_subdev *sub_dev, int enable)
+@@ -604,7 +647,7 @@ static int tevs_set_stream(struct v4l2_subdev *sub_dev, int enable)
  					.height);
  			cci_write(tevs->regmap,
  				  HOST_COMMAND_ISP_CTRL_PREVIEW_FORMAT,
 -				  TEVS_IMG_FORMAT_UYVY, NULL);
-+				  tevs_preview_format(tevs), NULL);
++				  tevs_isp_format(tevs->fmt.code), NULL);
  			cci_write(tevs->regmap,
  				  HOST_COMMAND_ISP_CTRL_PREVIEW_HINF_CTRL,
  				  0x10 | (tevs->continuous_clock << 5) |
-@@ -612,7 +648,7 @@ static int tevs_set_stream(struct v4l2_subdev *sub_dev, int enable)
- 				  NULL);
- 			cci_write(tevs->regmap,
- 				  HOST_COMMAND_ISP_CTRL_PREVIEW_MIPI_CTRL,
--				  tevs->vc_id, NULL);
-+				  tevs_preview_mipi_ctrl(tevs), NULL);
- 			cci_write(tevs->regmap,
- 				  HOST_COMMAND_ISP_CTRL_PREVIEW_SENSOR_MODE,
- 				  tevs_sensor_table[tevs->selected_sensor]
-@@ -685,7 +721,7 @@ static int tevs_enum_frame_size(struct v4l2_subdev *sub_dev,
+@@ -685,7 +728,7 @@ static int tevs_enum_frame_size(struct v4l2_subdev *sub_dev,
  	     tevs_sensor_table[tevs->selected_sensor].res_list_size))
  		return -EINVAL;
  
 -	if (fse->code != tevs_sensor_table[tevs->selected_sensor].code_list[0])
-+	if (!tevs_code_supported(tevs, fse->code))
++	if (fse->code != tevs_supported_code(tevs, fse->code))
  		return -EINVAL;
  
  	dev_dbg(sub_dev->dev, "%s(), index [%u]\n", __func__, fse->index);
-@@ -807,7 +843,8 @@ static int tevs_set_fmt(struct v4l2_subdev *sub_dev,
+@@ -807,9 +850,10 @@ static int tevs_set_fmt(struct v4l2_subdev *sub_dev,
  		tevs_sensor_table[tevs->selected_sensor].res_list[i].width;
  	mbus_fmt->height =
  		tevs_sensor_table[tevs->selected_sensor].res_list[i].height;
 -	mbus_fmt->code = tevs_sensor_table[tevs->selected_sensor].code_list[0];
-+	if (!tevs_code_supported(tevs, mbus_fmt->code))
-+		mbus_fmt->code = tevs_sensor_table[tevs->selected_sensor].code_list[0];
++	mbus_fmt->code = tevs_supported_code(tevs, mbus_fmt->code);
  	mbus_fmt->field = V4L2_FIELD_NONE;
- 	mbus_fmt->colorspace = V4L2_COLORSPACE_SRGB;
+-	mbus_fmt->colorspace = V4L2_COLORSPACE_SRGB;
++	mbus_fmt->colorspace = tevs_is_raw_code(mbus_fmt->code) ?
++		V4L2_COLORSPACE_RAW : V4L2_COLORSPACE_SRGB;
  	mbus_fmt->ycbcr_enc = V4L2_MAP_YCBCR_ENC_DEFAULT(mbus_fmt->colorspace);
-@@ -943,9 +980,11 @@ static int tevs_get_frame_desc(struct v4l2_subdev *sub_dev, unsigned int pad,
- 	fd->entry[0].pixelcode = tevs->fmt.code;
- 	fd->entry[0].bus.csi2.vc = 0;
- 	fd->entry[0].bus.csi2.dt =
--		tevs->fmt.code == MEDIA_BUS_FMT_SGRBG8_1X8 ?
-+		(tevs->fmt.code == MEDIA_BUS_FMT_SGRBG8_1X8 ||
-+		 tevs->fmt.code == MEDIA_BUS_FMT_Y8_1X8) ?
- 			MIPI_CSI2_DT_RAW8 :
--		tevs->fmt.code == MEDIA_BUS_FMT_SGRBG10_1X10 ?
-+		(tevs->fmt.code == MEDIA_BUS_FMT_SGRBG10_1X10 ||
-+		 tevs->fmt.code == MEDIA_BUS_FMT_Y10_1X10) ?
- 			MIPI_CSI2_DT_RAW10 :
- 		tevs->fmt.code == MEDIA_BUS_FMT_SGRBG12_1X12 ?
- 			MIPI_CSI2_DT_RAW12 :
-@@ -1285,13 +1324,13 @@ static int tevs_set_bsl_mode(struct tevs *tevs, s32 mode)
+ 	mbus_fmt->quantization = V4L2_QUANTIZATION_FULL_RANGE;
+ 	mbus_fmt->xfer_func = V4L2_MAP_XFER_FUNC_DEFAULT(mbus_fmt->colorspace);
+@@ -1285,7 +1329,7 @@ static int tevs_set_bsl_mode(struct tevs *tevs, s32 mode)
  		}
  
  		cci_write(tevs->regmap, HOST_COMMAND_ISP_CTRL_PREVIEW_FORMAT,
 -			  TEVS_IMG_FORMAT_UYVY, NULL);
-+			  tevs_preview_format(tevs), NULL);
++			  tevs_isp_format(tevs->fmt.code), NULL);
  		cci_write(tevs->regmap, HOST_COMMAND_ISP_CTRL_PREVIEW_HINF_CTRL,
  			  0x10 | (tevs->continuous_clock << 5) |
  				  (tevs->data_lanes),
- 			  NULL);
- 		cci_write(tevs->regmap, HOST_COMMAND_ISP_CTRL_PREVIEW_MIPI_CTRL,
--			  tevs->vc_id, NULL);
-+			  tevs_preview_mipi_ctrl(tevs), NULL);
- 
- 		break;
- 	case TEVS_BSL_MODE_FLASH_IDX:
-@@ -1996,7 +2035,7 @@ static int tevs_power_on(struct tevs *tevs)
+@@ -1996,7 +2040,7 @@ static int tevs_power_on(struct tevs *tevs)
  
  		ret += cci_write(tevs->regmap,
  				 HOST_COMMAND_ISP_CTRL_PREVIEW_FORMAT,
 -				 TEVS_IMG_FORMAT_UYVY, NULL);
-+				 tevs_preview_format(tevs), NULL);
++				 tevs_isp_format(tevs->fmt.code), NULL);
  		ret += cci_write(tevs->regmap,
  				 HOST_COMMAND_ISP_CTRL_PREVIEW_HINF_CTRL,
  				 0x10 | (tevs->continuous_clock << 5) |
-@@ -2004,7 +2043,7 @@ static int tevs_power_on(struct tevs *tevs)
- 				 NULL);
- 		ret += cci_write(tevs->regmap,
- 				 HOST_COMMAND_ISP_CTRL_PREVIEW_MIPI_CTRL,
--				 tevs->vc_id, NULL);
-+				 tevs_preview_mipi_ctrl(tevs), NULL);
- 		if (ret)
- 			goto error;
- 	}
 diff --git a/drivers/media/i2c/tevs/tevs_tbls.h b/drivers/media/i2c/tevs/tevs_tbls.h
-index f3a12f4..aaf9c21 100644
+index f3a12f4..dd25be2 100644
 --- a/drivers/media/i2c/tevs/tevs_tbls.h
 +++ b/drivers/media/i2c/tevs/tevs_tbls.h
-@@ -350,6 +350,8 @@ static struct resolution ar0821_res_list[] = {
+@@ -29,6 +29,7 @@ struct resolution {
+ /* AR0144 default setting for 4 data lanes and data frequency 800 MHz */
+ static u32 ar0144_code_list[] = {
+ 	MEDIA_BUS_FMT_UYVY8_1X16,
++	MEDIA_BUS_FMT_SGRBG10_1X10,
+ };
+ 
+ static u16 ar0144_framerates_640x480[] = { 60, 30, 20, 15, 10, 5 };
+@@ -56,6 +57,7 @@ static struct resolution ar0144_res_list[] = {
+ /* AR0145 default setting for 4 data lanes and data frequency 800 MHz */
+ static u32 ar0145_code_list[] = {
+ 	MEDIA_BUS_FMT_UYVY8_1X16,
++	MEDIA_BUS_FMT_SGRBG10_1X10,
+ };
+ 
+ static u16 ar0145_framerates_640x480[] = { 115, 60, 30, 20, 15, 10, 5 };
+@@ -83,6 +85,7 @@ static struct resolution ar0145_res_list[] = {
+ /* AR0234 default setting for 4 data lanes and data frequency 800 MHz */
+ static u32 ar0234_code_list[] = {
+ 	MEDIA_BUS_FMT_UYVY8_1X16,
++	MEDIA_BUS_FMT_SGRBG10_1X10,
+ };
+ 
+ static u16 ar0234_framerates_640x480[] = { 120, 60, 30, 20, 15, 10, 5 };
+@@ -116,6 +119,7 @@ static struct resolution ar0234_res_list[] = {
+ /* AR0235 default setting for 4 data lanes and data frequency 800 MHz */
+ static u32 ar0235_code_list[] = {
+ 	MEDIA_BUS_FMT_UYVY8_1X16,
++	MEDIA_BUS_FMT_SGRBG10_1X10,
+ };
+ 
+ static u16 ar0235_framerates_640x480[] = { 120, 60, 30, 20, 15, 10, 5 };
+@@ -149,6 +153,7 @@ static struct resolution ar0235_res_list[] = {
+ /* AR0246 default setting for 4 data lanes and data frequency 800 MHz */
+ static u32 ar0246_code_list[] = {
+ 	MEDIA_BUS_FMT_UYVY8_1X16,
++	MEDIA_BUS_FMT_SGRBG10_1X10,
+ };
+ 
+ static u16 ar0246_framerates_640x480[] = { 30, 20, 15, 10, 5 };
+@@ -176,6 +181,7 @@ static struct resolution ar0246_res_list[] = {
+ /* AR0521 default setting for 4 data lanes and data frequency 800 MHz */
+ static u32 ar0521_code_list[] = {
+ 	MEDIA_BUS_FMT_UYVY8_1X16,
++	MEDIA_BUS_FMT_SGRBG10_1X10,
+ };
+ 
+ static u16 ar0521_framerates_640x480[] = { 120, 60, 30, 20, 15, 10, 5 };
+@@ -221,6 +227,7 @@ static struct resolution ar0521_res_list[] = {
+ /* AR0522 default setting for 4 data lanes and data frequency 800 MHz */
+ static u32 ar0522_code_list[] = {
+ 	MEDIA_BUS_FMT_UYVY8_1X16,
++	MEDIA_BUS_FMT_SGRBG10_1X10,
+ };
+ 
+ static u16 ar0522_framerates_640x480[] = { 120, 60, 30, 20, 15, 10, 5 };
+@@ -266,6 +273,7 @@ static struct resolution ar0522_res_list[] = {
+ /* AR0544 default setting for 4 data lanes and data frequency 800 MHz */
+ static u32 ar0544_code_list[] = {
+ 	MEDIA_BUS_FMT_UYVY8_1X16,
++	MEDIA_BUS_FMT_SGRBG10_1X10,
+ };
+ 
+ static u16 ar0544_framerates_640x480[] = { 120, 60, 30, 20, 15, 10, 5 };
+@@ -311,6 +319,7 @@ static struct resolution ar0544_res_list[] = {
+ /* AR0821 default setting for 4 data lanes and data frequency 800 MHz */
+ static u32 ar0821_code_list[] = {
+ 	MEDIA_BUS_FMT_UYVY8_1X16,
++	MEDIA_BUS_FMT_SGRBG10_1X10,
+ };
+ 
+ static u16 ar0821_framerates_640x480[] = { 60, 30, 20, 15, 10, 5 };
+@@ -350,6 +359,7 @@ static struct resolution ar0821_res_list[] = {
  /* AR0822 default setting for 4 data lanes and data frequency 800 MHz */
  static u32 ar0822_code_list[] = {
  	MEDIA_BUS_FMT_UYVY8_1X16,
-+	MEDIA_BUS_FMT_Y8_1X8,
-+	MEDIA_BUS_FMT_Y10_1X10,
++	MEDIA_BUS_FMT_SGRBG10_1X10,
  };
  
  static u16 ar0822_framerates_640x480[] = { 60, 30, 20, 15, 10, 5 };
+@@ -389,6 +399,7 @@ static struct resolution ar0822_res_list[] = {
+ /* AR0830 default setting for 4 data lanes and data frequency 800 MHz */
+ static u32 ar0830_code_list[] = {
+ 	MEDIA_BUS_FMT_UYVY8_1X16,
++	MEDIA_BUS_FMT_SGRBG10_1X10,
+ };
+ 
+ static u16 ar0830_framerates_640x480[] = { 60, 30, 20, 15, 10, 5 };
+@@ -428,6 +439,7 @@ static struct resolution ar0830_res_list[] = {
+ /* AR1335 default setting for 4 data lanes and data frequency 800 MHz */
+ static u32 ar1335_code_list[] = {
+ 	MEDIA_BUS_FMT_UYVY8_1X16,
++	MEDIA_BUS_FMT_SGRBG10_1X10,
+ };
+ 
+ static u16 ar1335_framerates_640x480[] = { 60, 30, 20, 15, 10, 5 };
+@@ -473,6 +485,7 @@ static struct resolution ar1335_res_list[] = {
+ /* AR2020 default setting for 4 data lanes and data frequency 800 MHz */
+ static u32 ar2020_code_list[] = {
+ 	MEDIA_BUS_FMT_UYVY8_1X16,
++	MEDIA_BUS_FMT_SGRBG10_1X10,
+ };
+ 
+ // static u16 ar2020_framerates_640x480[] = { 120, 60, 30, 20, 15, 10, 5 };

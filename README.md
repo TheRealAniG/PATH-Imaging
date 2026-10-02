@@ -40,4 +40,4 @@ Rerun the build and install scripts after every kernel update.
 uv run python camera_API.py
 ```
 
-Shows 10 s of live RAW10 and saves the last frame as `raw10.pgm`. Quit with Ctrl+C, not Ctrl+Z.
+Shows 60 s of live RAW10 and saves the last frame as `raw10.pgm`. Quit with Ctrl+C, not Ctrl+Z.
