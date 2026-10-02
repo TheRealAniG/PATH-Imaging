@@ -18,12 +18,14 @@ uv sync
 
 No worktree yet? Run `bash /opt/path/worktrees/tian/scripts/setup_pi_user.sh <username> "Your Name" <github-email>` and add the SSH key it prints on GitHub.
 
+If `id` doesn't list both `video` and `i2c`, run `sudo usermod -aG video,i2c $USER` and log out and back in.
+
 ### On your own Pi
 
 ```bash
 sudo apt install git build-essential device-tree-compiler linux-headers-rpi-2712 v4l-utils \
   python3-gi gir1.2-gstreamer-1.0 gstreamer1.0-plugins-base gstreamer1.0-plugins-good
-curl -LsSf https://astral.sh/uv/install.sh | sh
+curl -LsSf https://astral.sh/uv/install.sh | sh && source $HOME/.local/bin/env
 git clone -b tian-dev git@github.com:TheRealAniG/PATH-Imaging.git && cd PATH-Imaging
 uv venv --system-site-packages && uv sync
 sudo usermod -aG video,i2c $USER
