@@ -4,3 +4,5 @@ __pycache__/
 .DS_Store
 .camera-driver/
 raw8.pgm
+hello_imx412.npy
+hello_imx412.png
