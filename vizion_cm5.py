@@ -29,11 +29,9 @@ _BOARD_ID = Path("/sys/firmware/devicetree/base/compatible")
 def _link_camera():
     """VizionSDK skips route setup on Raspberry Pi, and the CSI-2 -> capture link is off after
     boot, so discovery finds nothing until something enables it."""
-    for media in sorted(Path("/dev").glob("media*")):
-        result = subprocess.run(["media-ctl", "-d", media, "-l", '"csi2":4 -> "rp1-cfe-csi2_ch0":0 [1]'],
-                                capture_output=True)
-        if result.returncode == 0:
-            return
+    for media in sorted(Path("/dev").glob("media*")):  # Every receiver: the camera may be on CAM0 or CAM1
+        subprocess.run(["media-ctl", "-d", media, "-l", '"csi2":4 -> "rp1-cfe-csi2_ch0":0 [1]'],
+                       capture_output=True)
 
 
 def _enable():

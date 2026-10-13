@@ -6,6 +6,7 @@ RAW10 frames come back as flat uint16 arrays of 0-1023.
 Run on its own for a 60 s live RAW10 view: python camera_API.py
 """
 from pathlib import Path
+import re
 import subprocess
 
 import vizion_cm5  # noqa: F401  CM5 workaround, must come before pyvizionsdk
@@ -27,10 +28,12 @@ def VxSetFormat(vxcam, fmt):
     if fmt.format != VX_IMAGE_FORMAT_RAW10:
         return pyvizionsdk.VxSetFormat(vxcam, fmt)
     _raw10[id(vxcam)] = fmt
-    media = next(m for m in sorted(Path("/dev").glob("media*"))  # Numbering can change between boots
-                 if b"tevs 10-0048" in subprocess.run(["media-ctl", "-d", m, "-p"], capture_output=True).stdout)
+    for media in sorted(Path("/dev").glob("media*")):  # Numbering and sensor name (CAM0: 10-0048, CAM1: 0-0048) vary
+        sensor = re.search(rb"entity \d+: (tevs \S+)", subprocess.run(["media-ctl", "-d", media, "-p"], capture_output=True).stdout)
+        if sensor:
+            break
     size = f"fmt:SGRBG10_1X10/{fmt.width}x{fmt.height}"
-    for pad in (f'"tevs 10-0048":0 [{size}@1/{fmt.framerate} field:none]',
+    for pad in (f'"{sensor[1].decode()}":0 [{size}@1/{fmt.framerate} field:none]',
                 f'"csi2":0 [{size} field:none]', f'"csi2":4 [{size} field:none]'):
         subprocess.run(["media-ctl", "-d", media, "-V", pad])
     return 0

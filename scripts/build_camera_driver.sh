@@ -33,6 +33,7 @@ make -C "$headers" M="$build/source/drivers/media/i2c/tevs" CONFIG_VIDEO_TEVS=m 
 cpp -nostdinc -undef -D__DTS__ -x assembler-with-cpp -I "$includes" \
     "$build/source/arch/arm64/boot/dts/overlays/tevs-rpi22-overlay.dts" > "$build/tevs-rpi22.dts"
 dtc -@ -I dts -O dtb -o "$build/tevs-rpi22.dtbo" "$build/tevs-rpi22.dts"
+dtc -@ -I dts -O dtb -o "$build/tevs-cam1-reset.dtbo" "$repo_root/overlays/tevs-cam1-reset-overlay.dts"
 cp "$build/source/drivers/media/i2c/tevs/tevs.ko" "$build/tevs.ko"
 printf '%s\n' "$release" > "$build/kernel-release"
 echo "Built driver and overlay in $build for $release. See README.md to install."

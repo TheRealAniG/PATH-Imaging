@@ -20,6 +20,7 @@ if [[ "${vermagic%% *}" != "$release" ]]; then
 fi
 install -D -m 644 "$build/tevs.ko" "/lib/modules/$release/extra/tevs.ko"
 install -m 644 "$build/tevs-rpi22.dtbo" /boot/firmware/overlays/tevs-rpi22.dtbo
+install -m 644 "$build/tevs-cam1-reset.dtbo" /boot/firmware/overlays/tevs-cam1-reset.dtbo
 depmod -a "$release"
 # rp1-cfe holds a reference to a loaded tevs; detach it so the new module replaces the old one.
 cfe=/sys/bus/platform/drivers/rp1-cfe csi=1f00110000.csi

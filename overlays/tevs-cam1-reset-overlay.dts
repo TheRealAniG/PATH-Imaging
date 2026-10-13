@@ -1,0 +1,20 @@
+// TEVS on CAM/DISP 1 of the CM5 IO Board. That connector ties the camera's reset line
+// (pin 17, CDI_RST) high through R8, so the camera never gets a reset and never boots.
+// Hardware fix: wire GPIO 4 (header pin 7), through 330 ohm, to R8's connector-side pad.
+// This hands GPIO 4 to the driver as its reset line (low = reset, high = run), and powers
+// the camera from the always-on supply instead of the regulator CAM/DISP 0 uses.
+// Load after tevs-rpi22:  dtoverlay=tevs-rpi22,cam1  then  dtoverlay=tevs-cam1-reset
+/dts-v1/;
+/plugin/;
+
+/ {
+	compatible = "brcm,bcm2712";
+
+	fragment@0 {
+		target-path = "/axi/pcie@1000120000/rp1/i2c@70000/tevs@48";
+		__overlay__ {
+			reset-gpios = <&rp1_gpio 4 0>;
+			VANA-supply = <&cam_dummy_reg>;
+		};
+	};
+};

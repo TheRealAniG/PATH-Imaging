@@ -32,7 +32,9 @@ sudo usermod -aG video,i2c $USER
 bash scripts/build_camera_driver.sh && sudo bash scripts/install_camera_driver.sh
 ```
 
-In `/boot/firmware/config.txt`, set `camera_auto_detect=0` and add `dtoverlay=tevs-rpi22,cam0` (or `dtoverlay=tevs-rpi22` for CAM/DISP 1) at the end. Reboot.
+Connect the camera to **CAM/DISP 0**. In `/boot/firmware/config.txt`, set `camera_auto_detect=0`, add `dtoverlay=tevs-rpi22,cam0` at the end, and reboot.
+
+**CAM/DISP 1 on the CM5 IO Board** ties the camera's reset line (connector pin 17) high through R8, so the camera never boots (`tevs ... bootup timeout`). Fix: fit both J6 jumpers, wire GPIO 4 (header pin 7) through 330 Ω to R8's pad on the connector side (not its 3.3 V side), and use `dtoverlay=tevs-rpi22,cam1` followed by `dtoverlay=tevs-cam1-reset`. That overlay (installed by the install script) gives the driver GPIO 4 as its reset line.
 
 Rerun the build and install scripts after every kernel update.
 
