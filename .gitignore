@@ -6,3 +6,7 @@ __pycache__/
 raw8.pgm
 hello_imx412.npy
 hello_imx412.png
+fl_raw10.npy
+color_raw10.npy
+fl.png
+color.png
