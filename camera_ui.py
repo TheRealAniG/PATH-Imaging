@@ -1,7 +1,8 @@
 """Window showing both cameras live, with size and frame rate pickers and the measured frame rate.
 
   FL:    TechNexion TEVS-AR0822-M on CAM/DISP 0 (mono RAW10)
-  Color: Vision Components IMX412C on CAM/DISP 1 (colour RAW10, centre crop of the 4032x3040 sensor)
+  Color: Vision Components IMX412C on CAM/DISP 1 (colour RAW10, full 4032x3040 sensor at 30 ms, smaller sizes are centre
+         crops; the live view is white balanced and brightness stretched like hello_imx412.py)
 
 Picking a size or frame rate restarts that camera. Starting modes are CAMERAS in dual_stream.py.
 Capture saves each camera's latest frame, full size, as ~/Desktop/PATH-captures/<sensor>/<time>/<size>_<fps>.png (16-bit,

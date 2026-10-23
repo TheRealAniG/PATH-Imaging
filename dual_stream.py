@@ -1,7 +1,8 @@
 """Stream both cameras at the same time, each in its own window, for 60 s (Ctrl+C stops early).
 
   fl:    TechNexion TEVS-AR0822-M on CAM/DISP 0, mono RAW10 (TechNexion RAW patch: SGRBG10 -> 'GR16')
-  color: Vision Components IMX412C on CAM/DISP 1, colour RAW10 Bayer RGGB ('RG16')
+  color: Vision Components IMX412C on CAM/DISP 1, colour RAW10 Bayer RGGB ('RG16'), full sensor at 30 ms exposure;
+         its window is white balanced and brightness stretched like hello_imx412.py, the saved frames are not
 
 Both arrive as 16-bit with the 10 bits at the top (value << 6). Saves each camera's last frame as raw
 10-bit values (fl_raw10.npy, color_raw10.npy) and as previews (fl.png, color.png).
@@ -23,8 +24,9 @@ RUN_SECONDS = 60
 DISPLAY_FPS = 15  # Windows refresh this often; every frame is still captured
 CAMERAS = {  # name: entity pattern, media-bus format, V4L2 format, width, height, frame rate (None = sensor default)
     "fl": (r"tevs \S+", "SGRBG10_1X10", "GR16", 1920, 1080, 60),  # Or 2560, 1440, 30
-    "color": (r"vc_mipi_camera \S+", "SRGGB10_1X10", "RG16", 1280, 960, None),  # Centre crop of 4032x3040
+    "color": (r"vc_mipi_camera \S+", "SRGGB10_1X10", "RG16", 4032, 3040, None),  # Full sensor; smaller sizes are centre crops
 }
+EXPOSURE_US = 30000  # IMX412C, as in hello_imx412.py: the VC driver has no auto exposure, its default 10 ms is too dark indoors
 
 
 def start(name, pattern, mbus, pixfmt, width, height, fps, sink="autovideosink sync=false"):
@@ -47,7 +49,7 @@ def start(name, pattern, mbus, pixfmt, width, height, fps, sink="autovideosink s
                         f'"{sensor[1]}":0 [crop:({(4032 - width) // 4 * 2},{(3040 - height) // 4 * 2})/{width}x{height}]'])
         subdev = subprocess.run(["media-ctl", "-d", media, "-e", sensor[1]], capture_output=True, text=True).stdout.strip()
         # The VC driver assumes too short a line time: asking it for 30 fps gives 22.07, so ask 1.35x more
-        subprocess.run(["v4l2-ctl", "-d", subdev, "-c", f"frame_rate={round((fps or 0) * 1350)}"])
+        subprocess.run(["v4l2-ctl", "-d", subdev, "-c", f"frame_rate={round((fps or 0) * 1350)}", "-c", f"exposure={EXPOSURE_US}"])
     video = subprocess.run(["media-ctl", "-d", media, "-e", "rp1-cfe-csi2_ch0"], capture_output=True, text=True).stdout.strip()
     stream = subprocess.Popen(["v4l2-ctl", "-d", video, "--stream-mmap", "--stream-to=-",
                                f"--set-fmt-video=width={width},height={height},pixelformat={pixfmt}"],
@@ -66,7 +68,9 @@ def preview(name, frame, step):  # Small image for the window, at most ~1280 px 
     if name == "fl":
         return np.ascontiguousarray(frame[::step, ::step])
     s = 2 * step  # Each sampled 2x2 RGGB block becomes one BGR pixel: much cheaper than demosaicing everything
-    return (np.dstack((frame[1::s, 1::s], frame[::s, 1::s], frame[::s, ::s])) >> 8).astype(np.uint8)
+    bgr = np.dstack((frame[1::s, 1::s], frame[::s, 1::s], frame[::s, ::s])).astype(np.float32)
+    bgr *= bgr.mean() / np.maximum(bgr.mean(axis=(0, 1)), 1)  # Grey-world white balance, then stretch and gamma as in hello_imx412.py
+    return (np.clip(bgr / max(np.percentile(bgr, 99.5), 1), 0, 1) ** (1 / 2.2) * 255).astype(np.uint8)
 
 
 def run(name, cam, stop):
