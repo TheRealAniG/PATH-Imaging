@@ -1,8 +1,11 @@
 """Stream both cameras at the same time, each in its own window, for 60 s (Ctrl+C stops early).
 
   fl:    TechNexion TEVS-AR0822-M on CAM/DISP 0, mono RAW10 (TechNexion RAW patch: SGRBG10 -> 'GR16')
-  color: Vision Components IMX412C on CAM/DISP 1, colour RAW10 Bayer RGGB ('RG16'), full sensor at 30 ms exposure;
-         its window is white balanced and brightness stretched like hello_imx412.py, the saved frames are not
+  color: Vision Components IMX412C on CAM/DISP 1, colour RAW10 Bayer RGGB ('RG16'), full sensor
+
+Both cameras run at a fixed manual exposure (EXPOSURE_US; set_exposure changes it live): the TEVS's auto exposure
+only works through its ISP, which RAW10 bypasses, and the VC driver has none. The windows are brightness stretched
+and gamma corrected (the colour one also white balanced) like vc.to_rgb8; the saved frames are not.
 
 Both arrive as 16-bit with the 10 bits at the top (value << 6). Saves each camera's last frame as raw
 10-bit values (fl_raw10.npy, color_raw10.npy) and as previews (fl.png, color.png).
@@ -26,10 +29,10 @@ CAMERAS = {  # name: entity pattern, media-bus format, V4L2 format, width, heigh
     "fl": (r"tevs \S+", "SGRBG10_1X10", "GR16", 1920, 1080, 60),  # Or 2560, 1440, 30
     "color": (r"vc_mipi_camera \S+", "SRGGB10_1X10", "RG16", 4032, 3040, None),  # Full sensor; smaller sizes are centre crops
 }
-EXPOSURE_US = 30000  # IMX412C, as in hello_imx412.py: the VC driver has no auto exposure, its default 10 ms is too dark indoors
+EXPOSURE_US = {"fl": 4000, "color": 30000}  # Starting exposures; the drivers' own defaults (~1.2 ms fixed, 10 ms) are too dark indoors
 
 
-def start(name, pattern, mbus, pixfmt, width, height, fps, sink="autovideosink sync=false"):
+def start(name, pattern, mbus, pixfmt, width, height, fps, sink="autovideosink sync=false", exposure=None):
     for media in sorted(Path("/dev").glob("media*")):  # Media numbering changes between boots
         sensor = re.search(rf"entity \d+: ({pattern})", subprocess.run(
             ["media-ctl", "-d", media, "-p"], capture_output=True, text=True).stdout)
@@ -44,13 +47,16 @@ def start(name, pattern, mbus, pixfmt, width, height, fps, sink="autovideosink s
                  ["-V", f'"csi2":0 [fmt:{mbus}/{width}x{height} field:none]'],
                  ["-V", f'"csi2":4 [fmt:{mbus}/{width}x{height} field:none]']):
         subprocess.run(["media-ctl", "-d", media, *args])
+    subdev = subprocess.run(["media-ctl", "-d", media, "-e", sensor[1]], capture_output=True, text=True).stdout.strip()
+    exposure = exposure or EXPOSURE_US[name]
     if sensor[1].startswith("vc_mipi"):  # IMX412C: centre the crop on the 4032x3040 sensor; frame rate in mHz, 0 = fastest
         subprocess.run(["media-ctl", "-d", media, "-V",
                         f'"{sensor[1]}":0 [crop:({(4032 - width) // 4 * 2},{(3040 - height) // 4 * 2})/{width}x{height}]'])
-        subdev = subprocess.run(["media-ctl", "-d", media, "-e", sensor[1]], capture_output=True, text=True).stdout.strip()
         # The VC driver assumes too short a line time: asking it for 30 fps gives 22.07, so ask 1.35x more
-        subprocess.run(["v4l2-ctl", "-d", subdev, "-c", f"frame_rate={round((fps or 0) * 1350)}", "-c", f"exposure={EXPOSURE_US}"])
-    video = subprocess.run(["media-ctl", "-d", media, "-e", "rp1-cfe-csi2_ch0"], capture_output=True, text=True).stdout.strip()
+        subprocess.run(["v4l2-ctl", "-d", subdev, "-c", f"frame_rate={round((fps or 0) * 1350)}", "-c", f"exposure={exposure}"])
+    else:  # TEVS: manual mode, otherwise the exposure value is ignored
+        subprocess.run(["v4l2-ctl", "-d", subdev, "-c", "exposure_mode=0", "-c", f"exposure={exposure}"])
+    video =subprocess.run(["media-ctl", "-d", media, "-e", "rp1-cfe-csi2_ch0"], capture_output=True, text=True).stdout.strip()
     stream = subprocess.Popen(["v4l2-ctl", "-d", video, "--stream-mmap", "--stream-to=-",
                                f"--set-fmt-video=width={width},height={height},pixelformat={pixfmt}"],
                               stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
@@ -61,16 +67,26 @@ def start(name, pattern, mbus, pixfmt, width, height, fps, sink="autovideosink s
                               f"format={'GRAY16_LE' if name == 'fl' else 'BGR'},width={shown[1]},height={shown[0]},"
                               f"framerate={DISPLAY_FPS}/1 ! videoconvert ! {sink}")
     print(f"{name}: {sensor[1]} on {media} -> {video}, {width}x{height} {pixfmt}")
-    return {"stream": stream, "window": window, "size": (height, width), "step": step, "frames": 0, "last": None}
+    return {"stream": stream, "window": window, "size": (height, width), "step": step, "frames": 0, "last": None,
+            "subdev": subdev, "exposure": exposure}
+
+
+def set_exposure(cam, us):  # Microseconds, applied live
+    subprocess.run(["v4l2-ctl", "-d", cam["subdev"], "-c", f"exposure={us}"])
+    cam["exposure"] = us
 
 
 def preview(name, frame, step):  # Small image for the window, at most ~1280 px wide
     if name == "fl":
-        return np.ascontiguousarray(frame[::step, ::step])
+        return stretch(frame[::step, ::step].astype(np.float32), np.uint16)
     s = 2 * step  # Each sampled 2x2 RGGB block becomes one BGR pixel: much cheaper than demosaicing everything
     bgr = np.dstack((frame[1::s, 1::s], frame[::s, 1::s], frame[::s, ::s])).astype(np.float32)
-    bgr *= bgr.mean() / np.maximum(bgr.mean(axis=(0, 1)), 1)  # Grey-world white balance, then stretch and gamma as in hello_imx412.py
-    return (np.clip(bgr / max(np.percentile(bgr, 99.5), 1), 0, 1) ** (1 / 2.2) * 255).astype(np.uint8)
+    bgr *= bgr.mean() / np.maximum(bgr.mean(axis=(0, 1)), 1)  # Grey-world white balance
+    return stretch(bgr, np.uint8)
+
+
+def stretch(x, dtype):  # Brightest pixels (99.5th percentile, on a subsample for speed) to white, then gamma, as in vc.to_rgb8
+    return (np.clip(x / max(np.percentile(x[::4, ::4], 99.5), 1), 0, 1) ** (1 / 2.2) * np.iinfo(dtype).max).astype(dtype)
 
 
 def run(name, cam, stop):
