@@ -1,4 +1,4 @@
-# Vision Components official V4L2 capture example, unmodified below this header.
+# Vision Components official V4L2 capture example, unmodified below this header except one fix: the mmap offset is read from byte 64 of struct v4l2_buffer, not 68 (see request_buffers).
 # Source: https://github.com/VC-MIPI-modules/vc_mipi_raspi/blob/df65f88/examples/capture_y10.py
 # License: GPL-2.0 (see https://github.com/VC-MIPI-modules/vc_mipi_raspi/blob/df65f88/LICENSE)
 #!/usr/bin/env python3
@@ -197,7 +197,7 @@ class V4L2Capture:
             # Extract buffer info
             # m.offset is at 68 (first field of union after memory)
             # length is at 72 (after the 8-byte union)
-            offset = struct.unpack('I', buf[68:72])[0]
+            offset = struct.unpack('I', buf[64:68])[0]  # PATH fix: m is 8-byte aligned, so it is at 64 on arm64, not 68 (VC's value maps every buffer at 0)
             length = struct.unpack('I', buf[72:76])[0]
             
             print(f"  Buffer {i}: length={length}, offset={offset:#x}")

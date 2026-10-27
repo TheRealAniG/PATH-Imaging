@@ -4,8 +4,7 @@ __pycache__/
 .DS_Store
 .camera-driver/
 raw8.pgm
-hello_imx412.npy
-hello_imx412.png
+/capture_raw10.*
 fl_raw10.npy
 color_raw10.npy
 fl.png

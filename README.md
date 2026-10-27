@@ -1,7 +1,17 @@
 # PATH-Imaging
 Repository for PATH Imaging Clinic Project 2026-2027
 
-RAW10 capture from the TechNexion TEVS-AR0822-M camera on a Raspberry Pi 5 / CM5.
+RAW10 capture from two cameras on a Raspberry Pi 5 / CM5: the TechNexion TEVS-AR0822-M (mono, "FL", CAM/DISP 0)
+and the Vision Components IMX412C (colour, CAM/DISP 1).
+
+| | |
+|---|---|
+| `camera_ui.py`, `dual_stream.py` | Live window for both cameras with size, frame rate, exposure and capture |
+| `vc/` | IMX412C package: `v4l2_capture.py` and `vc_controls.py` are VC's own examples, `imx412.py` is our `Camera` class |
+| `scripts/capture_raw10.py` | Grab N IMX412C frames, save the last one (`.npy` + `.json`, `--png` preview) |
+| `docs/vc-imx412-setup.md` | IMX412C driver and boot setup |
+| `camera_API.py`, `vizion_cm5.py` | TEVS through TechNexion's VizionSDK (CM5 workaround included) |
+| `patches/`, `overlays/`, `scripts/*_camera_driver.sh` | TEVS driver build and install |
 
 ## Setup
 
@@ -38,10 +48,14 @@ Connect the camera to **CAM/DISP 0**. In `/boot/firmware/config.txt`, set `camer
 
 Rerun the build and install scripts after every kernel update.
 
+For the IMX412C see `docs/vc-imx412-setup.md`.
+
 ## Run
 
 ```bash
-uv run python camera_API.py
+uv run python camera_ui.py                        # both cameras live; Capture saves to ~/Desktop/PATH-captures
+uv run python scripts/capture_raw10.py --png      # one IMX412C RAW10 frame from Python (see vc/imx412.py)
+uv run python camera_API.py                       # TEVS through VizionSDK: 60 s live RAW10, saves raw10.pgm
 ```
 
-Shows 60 s of live RAW10 and saves the last frame as `raw10.pgm`. Quit with Ctrl+C, not Ctrl+Z.
+Quit with Ctrl+C, not Ctrl+Z: a paused run keeps the camera busy.
