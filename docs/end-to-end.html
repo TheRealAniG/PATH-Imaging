@@ -1,0 +1,1170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PATH Imaging End to End</title>
+<style>
+/* Layout: one reading column with figures that span it; a sticky contents rail beside it at desktop width.
+   Two hues carry meaning in every figure: teal = FL camera, amber = colour camera. */
+:root{
+  --bg:#f5f6f8; --surface:#ffffff; --ink:#18202b; --muted:#566273; --line:#d0d6de; --soft:#e9edf2; --kern:#edf0f5;
+  --accent:#3447b8; --accent-bg:#e4e8fb;
+  --fl:#0b7785; --fl-bg:#dff1f3; --co:#a25600; --co-bg:#fbeedb;
+  --bad:#b3372f; --bad-bg:#fbe7e4; --good:#1f7a44; --good-bg:#e1f3e7; --code-bg:#eceff3;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,Ubuntu,"Noto Sans","Helvetica Neue",Arial,sans-serif;
+  --mono:ui-monospace,"Ubuntu Mono","DejaVu Sans Mono","SF Mono",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#11151b; --surface:#19202a; --ink:#e5e9ef; --muted:#9ba6b5; --line:#343e4c; --soft:#222a35; --kern:#161c25;
+  --accent:#96a5ff; --accent-bg:#232b52;
+  --fl:#5cc8d3; --fl-bg:#12333a; --co:#f0ad5c; --co-bg:#3a2a12;
+  --bad:#f08379; --bad-bg:#3b1c19; --good:#6fd198; --good-bg:#15301f; --code-bg:#1f2732; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#11151b; --surface:#19202a; --ink:#e5e9ef; --muted:#9ba6b5; --line:#343e4c; --soft:#222a35; --kern:#161c25;
+  --accent:#96a5ff; --accent-bg:#232b52;
+  --fl:#5cc8d3; --fl-bg:#12333a; --co:#f0ad5c; --co-bg:#3a2a12;
+  --bad:#f08379; --bad-bg:#3b1c19; --good:#6fd198; --good-bg:#15301f; --code-bg:#1f2732; color-scheme:dark}
+
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.62 var(--sans);-webkit-text-size-adjust:100%}
+.wrap{max-width:1200px;margin:0 auto;padding-block:28px 80px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:grid;grid-template-columns:210px minmax(0,1fr);gap:52px}
+nav.toc{position:sticky;top:20px;align-self:start;max-height:calc(100vh - 40px);overflow:auto;font-size:14px;line-height:1.35}
+nav.toc p{margin:0 0 10px;font:700 11px/1 var(--mono);letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
+nav.toc ol{margin:0;padding:0;list-style:none;counter-reset:s;display:flex;flex-direction:column;gap:2px}
+nav.toc li{counter-increment:s;margin:0}
+nav.toc a{display:flex;gap:8px;padding:5px 8px;border-radius:6px;color:var(--ink);text-decoration:none}
+nav.toc a::before{content:counter(s,decimal-leading-zero);font:12px/1.5 var(--mono);color:var(--muted)}
+nav.toc a:hover{background:var(--soft)}
+main{min-width:0}
+a{color:var(--accent)}
+a:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:3px}
+a.t{color:inherit;text-decoration:underline dotted var(--muted);text-underline-offset:3px;font-weight:600}
+a.t:hover{color:var(--accent)}
+
+header.top{padding-bottom:8px}
+.eyebrow{font:700 11.5px/1.4 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 10px}
+h1{font-size:clamp(30px,5vw,46px);line-height:1.08;letter-spacing:-.02em;margin:0 0 14px;text-wrap:balance}
+.lede{font-size:19px;line-height:1.5;max-width:62ch;margin:0 0 20px}
+h2{font-size:27px;line-height:1.2;letter-spacing:-.012em;margin:0 0 6px;text-wrap:balance}
+h3{font-size:18px;line-height:1.3;margin:30px 0 6px;text-wrap:balance}
+section{padding-top:56px}
+section>.num{font:700 12px/1 var(--mono);letter-spacing:.09em;color:var(--muted);text-transform:uppercase;margin:0 0 8px}
+p,li,dd{max-width:70ch}
+p{margin:10px 0}
+ul,ol{padding-left:22px;margin:10px 0}
+li{margin:5px 0}
+code{font:.88em var(--mono);background:var(--code-bg);padding:.1em .35em;border-radius:4px;overflow-wrap:anywhere}
+pre{background:var(--code-bg);border:1px solid var(--line);padding:12px 14px;border-radius:8px;overflow-x:auto;font:13px/1.55 var(--mono);margin:14px 0;max-width:100%}
+pre code{background:none;padding:0;font-size:inherit;overflow-wrap:normal}
+
+.journey{display:flex;flex-wrap:wrap;gap:8px 6px;align-items:center;margin:22px 0 4px;padding:0;list-style:none;font-size:14px}
+.journey li{display:flex;align-items:center;gap:6px;margin:0}
+.journey a{display:block;padding:7px 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--ink);text-decoration:none;font-weight:600}
+.journey a:hover{border-color:var(--accent);color:var(--accent)}
+.journey li+li::before{content:"→";color:var(--muted)}
+
+.status{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;margin:22px 0 0}
+.status div{border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:12px 14px;font-size:14.5px;line-height:1.45}
+.status b{display:block;font:700 11px/1.4 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:4px}
+
+/* Further reading, placed directly under the concept it belongs to */
+.more{margin:14px 0 8px;padding:10px 14px;border:1px dashed var(--muted);border-radius:10px;font-size:14px;line-height:1.5;max-width:78ch}
+.more p{margin:3px 0;max-width:none}
+.more b{font:700 10.5px/1 var(--mono);letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin-right:8px}
+.more i{font-style:normal;color:var(--muted)}
+.more a.v::before{content:"▶ ";font-size:.78em}
+
+figure{margin:22px 0 26px}
+.scroll{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--surface);padding:14px}
+figcaption{font-size:14px;line-height:1.5;color:var(--muted);margin-top:8px;max-width:78ch}
+figcaption b{color:var(--ink)}
+svg.d{display:block;width:100%;height:auto;min-width:640px}
+svg.d.sm{min-width:520px}
+svg.d text{font-family:var(--sans);font-size:12.5px;fill:var(--ink)}
+.d .b{font-weight:700}
+.d .s{font-size:11px;fill:var(--muted)}
+.d .m{font-family:var(--mono);font-size:10.8px}
+.d .mb{font-family:var(--mono);font-size:12px;font-weight:700}
+.d .c{text-anchor:middle}
+.d .e{text-anchor:end}
+.d .cap{font:700 10.5px var(--mono);letter-spacing:.09em;fill:var(--muted)}
+.d .tfl{fill:var(--fl)} .d .tco{fill:var(--co)} .d .tbad{fill:var(--bad)} .d .tgood{fill:var(--good)}
+.d .bx{fill:var(--surface);stroke:var(--line);stroke-width:1.3}
+.d .bg{fill:var(--bg);stroke:var(--line);stroke-width:1.3}
+.d .band{fill:var(--kern);stroke:var(--line);stroke-width:1}
+.d .band2{fill:var(--soft);stroke:none}
+.d .grp{fill:none;stroke:var(--muted);stroke-width:1.2;stroke-dasharray:5 4}
+.d .flb{fill:var(--fl-bg);stroke:var(--fl);stroke-width:1.5}
+.d .cob{fill:var(--co-bg);stroke:var(--co);stroke-width:1.5}
+.d .acb{fill:var(--accent-bg);stroke:var(--accent);stroke-width:1.3}
+.d .ln{stroke:var(--ink);stroke-width:1.4;fill:none}
+.d .a{stroke:var(--ink);stroke-width:1.4;fill:none;marker-end:url(#ar)}
+.d .afl{stroke:var(--fl);stroke-width:1.8;fill:none;marker-end:url(#ar-fl)}
+.d .aco{stroke:var(--co);stroke-width:1.8;fill:none;marker-end:url(#ar-co)}
+.d .amu{stroke:var(--muted);stroke-width:1.2;fill:none;stroke-dasharray:5 4;marker-end:url(#ar-mu)}
+.d .lmu{stroke:var(--muted);stroke-width:1.2;fill:none}
+.d .dsh{stroke-dasharray:5 4}
+.d .fgood{fill:var(--good)} .d .fbad{fill:var(--bad)} .d .fmu{fill:var(--muted)} .d .fco{fill:var(--co)}
+.d .fsoft{fill:var(--soft);stroke:var(--line)}
+.d .fbadl{fill:var(--bad);opacity:.4}
+.d .bw{fill:#fff;font-weight:700;font-size:14px}
+.d .bws{fill:#fff;font-size:10px}
+.mk{fill:var(--ink)} .mk-fl{fill:var(--fl)} .mk-co{fill:var(--co)} .mk-mu{fill:var(--muted)}
+
+.tw{overflow-x:auto;margin:16px 0 20px;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:14.5px;line-height:1.45;font-variant-numeric:tabular-nums}
+th,td{text-align:left;vertical-align:top;padding:9px 12px;border-bottom:1px solid var(--line)}
+tr:last-child>td,tr:last-child>th{border-bottom:0}
+thead th{font:700 11.5px/1.4 var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);background:var(--soft);white-space:nowrap;border-bottom:1px solid var(--line)}
+tbody th{font-weight:600}
+td.n{white-space:nowrap}
+.fl{color:var(--fl);font-weight:700} .co{color:var(--co);font-weight:700}
+
+.box{border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:12px 16px;margin:16px 0;max-width:78ch}
+.box.warn{border-color:var(--bad);background:var(--bad-bg)}
+.box p{margin:6px 0}.box p:first-child{margin-top:0}.box p:last-child{margin-bottom:0}
+.tag{display:inline-block;font:700 10.5px/1 var(--mono);letter-spacing:.06em;text-transform:uppercase;padding:4px 7px;border-radius:5px;border:1px solid var(--line);color:var(--muted);vertical-align:1px;white-space:nowrap}
+.tag.m{color:var(--good);border-color:var(--good)} .tag.c{color:var(--accent);border-color:var(--accent)} .tag.u{color:var(--bad);border-color:var(--bad)}
+
+ol.steps{counter-reset:st;list-style:none;padding:0;margin:14px 0}
+ol.steps>li{counter-increment:st;position:relative;padding-left:40px;margin:10px 0}
+ol.steps>li::before{content:counter(st);position:absolute;left:0;top:1px;width:26px;height:26px;border-radius:50%;border:1.5px solid var(--muted);color:var(--muted);font:700 12.5px/23px var(--mono);text-align:center}
+
+dl.gloss{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px 28px;margin:18px 0}
+dl.gloss div{padding:10px 0;border-top:1px solid var(--line);min-width:0}
+dl.gloss dt{font-weight:700}
+dl.gloss dd{margin:3px 0 0;font-size:14.5px;line-height:1.5;color:var(--muted)}
+:target{scroll-margin-top:16px}
+dl.gloss div:target{background:var(--accent-bg);border-radius:6px;padding-inline:8px}
+footer{margin-top:64px;padding-top:16px;border-top:1px solid var(--line);font-size:14px;color:var(--muted)}
+
+@media (max-width:980px){
+  .wrap{display:block}
+  nav.toc{position:static;max-height:none;margin-bottom:8px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+  nav.toc ol{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr))}
+  section{padding-top:44px}
+}
+@media print{nav.toc{display:none}.wrap{display:block}svg.d{min-width:0}}
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk" d="M0 0L10 5L0 10z"/></marker>
+    <marker id="ar-fl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path class="mk-fl" d="M0 0L10 5L0 10z"/></marker>
+    <marker id="ar-co" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path class="mk-co" d="M0 0L10 5L0 10z"/></marker>
+    <marker id="ar-mu" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk-mu" d="M0 0L10 5L0 10z"/></marker>
+  </defs>
+</svg>
+
+<div class="wrap">
+
+<nav class="toc" aria-label="Contents">
+  <p>Contents</p>
+  <ol>
+    <li><a href="#overview">The whole thing in one picture</a></li>
+    <li><a href="#pixels">What a camera sends</a></li>
+    <li><a href="#cable">Sensor to computer</a></li>
+    <li><a href="#linux">Inside Linux</a></li>
+    <li><a href="#streaming">Getting frames</a></li>
+    <li><a href="#pipe">Processes and pipes</a></li>
+    <li><a href="#code">The code</a></li>
+    <li><a href="#preview">The live view</a></li>
+    <li><a href="#files">Saved files</a></li>
+    <li><a href="#speed">Frame rate</a></li>
+    <li><a href="#drivers">Drivers and boot</a></li>
+    <li><a href="#run">Run it</a></li>
+    <li><a href="#open">Open problems</a></li>
+    <li><a href="#glossary">Glossary</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<header class="top">
+  <p class="eyebrow">PATH Imaging · Clinic Project 2026–2027 · branch tian-dev</p>
+  <h1>PATH Imaging, end to end</h1>
+  <p class="lede">How one frame travels from a camera sensor to the window on your screen and the file on your desktop, and what every term on the way means. It covers the Raspberry Pi 5 / CM5 setup the project started on and the Jetson Orin Nano port.</p>
+  <p>You do not need to know Linux or cameras to read this. Each term is explained where it first appears, and every term with a dotted underline is also in the <a href="#glossary">glossary</a>. Dashed boxes labelled Read and Watch point to outside documentation and videos for the concept just explained. The sections follow the frame:</p>
+  <ol class="journey" aria-label="The path of a frame">
+    <li><a href="#pixels">Sensor</a></li>
+    <li><a href="#cable">Cable</a></li>
+    <li><a href="#linux">Kernel driver</a></li>
+    <li><a href="#streaming">Buffers</a></li>
+    <li><a href="#code">Python thread</a></li>
+    <li><a href="#preview">Window and files</a></li>
+  </ol>
+  <div class="status">
+    <div><b>State on</b>10 November 2026. Numbers marked <span class="tag m">measured</span> were taken that day on the Jetson.</div>
+    <div><b>Works today</b>Both cameras stream RAW10 on the Jetson: colour at 20 fps, FL at 58.5 fps, together, in the UI.</div>
+    <div><b>Not yet</b>The Jetson port is in the working tree, not committed. The Pi code paths have not been rerun since.</div>
+  </div>
+</header>
+
+<!-- ============================================================ 1 -->
+<section id="overview">
+  <p class="num">Section 01</p>
+  <h2>The whole thing in one picture</h2>
+  <p>The rig has two cameras. The <span class="fl">FL camera</span> is mono (black and white) and takes the fluorescence image. The <span class="co">colour camera</span> takes the ordinary colour image. A small computer receives both video streams, shows them live, and saves full-size frames when you press Capture. Throughout this page, teal means the FL camera and amber means the colour camera.</p>
+
+  <figure>
+    <div class="scroll">
+    <svg class="d" viewBox="0 0 960 552" role="img" aria-label="Both cameras send frames over CSI-2 cables into kernel drivers, which place them in buffers. A Python capture thread per camera copies each frame out and makes a preview for the window. Settings travel back down through v4l2-ctl.">
+      <text class="cap" x="14" y="36">CAMERAS</text>
+      <rect class="band" x="10" y="150" width="940" height="116" rx="8"/>
+      <text class="cap" x="24" y="174">LINUX KERNEL</text>
+      <rect class="band2" x="10" y="298" width="940" height="142" rx="8"/>
+      <text class="cap" x="24" y="322">OUR PYTHON</text>
+      <text class="cap" x="14" y="494">OUTPUT</text>
+
+      <rect class="flb" x="170" y="20" width="350" height="84" rx="8"/>
+      <text class="b" x="186" y="44">FL camera</text>
+      <text x="186" y="64">TechNexion TEVS-AR0822-M, mono</text>
+      <text class="s" x="186" y="84">1920 × 1080 RAW10 · 4.1 MB a frame · 60 fps</text>
+      <rect class="cob" x="560" y="20" width="350" height="84" rx="8"/>
+      <text class="b" x="576" y="44">Colour camera</text>
+      <text x="576" y="64">Vision Components IMX412C</text>
+      <text class="s" x="576" y="84">4032 × 3040 RAW10 · 24.5 MB a frame · 20 fps here</text>
+
+      <path class="afl" d="M345 104V160"/>
+      <text class="s" x="357" y="134">CSI-2 cable, 4 lanes (CAM1)</text>
+      <path class="aco" d="M735 104V160"/>
+      <text class="s" x="747" y="134">CSI-2 cable, 2 lanes (CAM0)</text>
+
+      <rect class="bx" x="170" y="162" width="350" height="90" rx="8"/>
+      <text class="b" x="186" y="186">tevs driver + NVIDIA capture</text>
+      <text class="m" x="186" y="206">/dev/video1</text>
+      <text class="s" x="186" y="228">each frame lands in one of 4 buffers</text>
+      <rect class="bx" x="560" y="162" width="350" height="90" rx="8"/>
+      <text class="b" x="576" y="186">vc_mipi driver + NVIDIA capture</text>
+      <text class="m" x="576" y="206">/dev/video0</text>
+      <text class="s" x="576" y="228">each frame lands in one of 4 buffers</text>
+
+      <path class="afl" d="M345 252V306"/>
+      <text class="s" x="357" y="286">read in place (mmap)</text>
+      <path class="aco" d="M735 252V306"/>
+      <text class="s" x="747" y="286">read in place (mmap)</text>
+
+      <rect class="bx" x="170" y="308" width="350" height="68" rx="8"/>
+      <text class="b" x="186" y="330">Capture thread: run()</text>
+      <text class="s" x="186" y="348">copy the frame out, hand the buffer back</text>
+      <text class="s" x="186" y="364">keep the newest frame as cam["last"]</text>
+      <rect class="bx" x="560" y="308" width="350" height="68" rx="8"/>
+      <text class="b" x="576" y="330">Capture thread: run()</text>
+      <text class="s" x="576" y="348">copy the frame out, hand the buffer back</text>
+      <text class="s" x="576" y="364">keep the newest frame as cam["last"]</text>
+      <path class="afl" d="M345 376V393"/>
+      <path class="aco" d="M735 376V393"/>
+      <rect class="bx" x="170" y="394" width="350" height="36" rx="8"/>
+      <text x="186" y="417">preview(): small image, about 15 a second</text>
+      <rect class="bx" x="560" y="394" width="350" height="36" rx="8"/>
+      <text x="576" y="417">preview(): small image, about 15 a second</text>
+
+      <path class="afl" d="M345 430V469"/>
+      <path class="aco" d="M735 430V469"/>
+      <rect class="bx" x="170" y="470" width="740" height="72" rx="8"/>
+      <text class="b" x="186" y="494">camera_ui.py window</text>
+      <text x="186" y="514">two live views · size, frame rate, exposure and gain boxes · measured fps</text>
+      <text class="s" x="186" y="532">Capture button → full-size .raw and .png files in ~/Desktop/PATH-captures/</text>
+
+      <path class="amu" d="M910 506H928V207H912"/>
+      <text class="s c" transform="rotate(-90 944 356)" x="944" y="356">settings go back down: v4l2-ctl -c exposure=…</text>
+    </svg>
+    </div>
+    <figcaption><b>The system as it runs on the Jetson today.</b> Frames flow down. Settings (exposure, gain, frame rate) flow back up through a separate small command, drawn dashed; that path exists for both cameras. On the Raspberry Pi the picture is the same except for the kernel layer and the ports.</figcaption>
+  </figure>
+
+  <h3>The two cameras</h3>
+  <div class="tw"><table>
+    <thead><tr><th></th><th>FL camera</th><th>Colour camera</th></tr></thead>
+    <tbody>
+      <tr><th>Product</th><td>TechNexion TEVS-AR0822-M</td><td>Vision Components VC MIPI IMX412C</td></tr>
+      <tr><th>Sensor</th><td>onsemi AR0822, mono</td><td>Sony IMX412, colour, 12.3 megapixels</td></tr>
+      <tr><th>Largest frame we use</th><td class="n">3840 × 2160</td><td class="n">4032 × 3040</td></tr>
+      <tr><th>Starting mode in the UI</th><td>1920 × 1080 at 60 fps</td><td>4032 × 3040 at the sensor's maximum</td></tr>
+      <tr><th>Own image processor</th><td>Yes. RAW10 output bypasses it.</td><td>No</td></tr>
+      <tr><th>Kernel driver</th><td><code>tevs</code> (TechNexion) plus our RAW10 patch</td><td><code>vc_mipi</code> (Vision Components)</td></tr>
+      <tr><th>Exposure</th><td>microseconds, manual mode; starts at 4 ms</td><td>microseconds; starts at 30 ms</td></tr>
+      <tr><th>Gain</th><td>1× to 64×</td><td>Pi: 0 to 48 dB. Jetson: 1× to 22×</td></tr>
+    </tbody>
+  </table></div>
+  <aside class="more">
+    <p><b>Read</b><a href="https://www.technexion.com/products/embedded-vision/mipi-csi2/tevs/tevs-ar0822/" target="_blank" rel="noopener">TechNexion TEVS-AR0822 product page</a> · <a href="https://www.mipi-modules.com/fileadmin/external/documentation/hardware/VC_MIPI_Camera_Module/index_mouser.html" target="_blank" rel="noopener">VC MIPI camera module hardware manual</a> (the IMX412 C table)</p>
+  </aside>
+
+  <h3>The two computers</h3>
+  <div class="tw"><table>
+    <thead><tr><th></th><th>Raspberry Pi 5 / CM5</th><th>Jetson Orin Nano</th></tr></thead>
+    <tbody>
+      <tr><th>Role</th><td>Where the project started. There is a shared team Pi.</td><td>Port in progress. NVIDIA's small computer.</td></tr>
+      <tr><th>FL camera port</th><td>CAM/DISP 0</td><td>CAM1 (4 lanes)</td></tr>
+      <tr><th>Colour camera port</th><td>CAM/DISP 1 (4 lanes)</td><td>CAM0 (2 lanes)</td></tr>
+      <tr><th>Colour camera, full frame</th><td>40.06 fps by the driver's table <span class="tag u">not measured here</span></td><td>20.05 fps <span class="tag m">measured</span></td></tr>
+      <tr><th>Capture device files</th><td>Media device, sub-device and video node, wired together with <code>media-ctl</code></td><td>One video node per camera</td></tr>
+      <tr><th>Pixel format names</th><td><code>RG16</code> (colour), <code>GR16</code> (FL)</td><td><code>RG10</code> (colour), <code>BA10</code> (FL)</td></tr>
+      <tr><th>Run Python with</th><td><code>uv run python …</code></td><td><code>.venv/bin/python …</code> (never <code>uv run</code>)</td></tr>
+    </tbody>
+  </table></div>
+  <p>The code decides which computer it is on with one line in <code>vc/tegra.py</code>: <code>IS_JETSON</code> is true when the file <code>/proc/device-tree/compatible</code> contains <code>nvidia,tegra</code>.</p>
+</section>
+
+<!-- ============================================================ 2 -->
+<section id="pixels">
+  <p class="num">Section 02 · Sensor</p>
+  <h2>What a camera sends</h2>
+  <p>A <a class="t" href="#g-sensor">sensor</a> is a grid of light detectors called pixels. During the <a class="t" href="#g-exposure">exposure</a> each pixel collects light, then reports one number saying how much it got. A frame is the full grid of numbers from one exposure.</p>
+  <p>Our cameras report 10-bit numbers. Ten bits can count from 0 (no light) to 1023 (as bright as the pixel can record). This is the <a class="t" href="#g-bitdepth">bit depth</a>, and frames in this form are called <a class="t" href="#g-raw10">RAW10</a>. "Raw" means the numbers come straight from the sensor. Nothing has adjusted brightness or colour.</p>
+  <p>Most cameras do not hand out raw numbers. An <a class="t" href="#g-isp">ISP</a> (image signal processor) first turns them into a finished picture and outputs a video format such as <a class="t" href="#g-yuy2">YUY2 or UYVY</a>. The TEVS has an ISP on board. We ask it for RAW10, which bypasses the ISP, because the project needs the sensor's own values. One consequence: the TEVS's automatic exposure lives in that ISP, so in RAW10 we set the exposure by hand.</p>
+  <aside class="more">
+    <p><b>Read</b><a href="https://en.wikipedia.org/wiki/Image_sensor" target="_blank" rel="noopener">Image sensor</a> · <a href="https://en.wikipedia.org/wiki/Raw_image_format" target="_blank" rel="noopener">Raw image format</a> · <a href="https://en.wikipedia.org/wiki/Image_processor" target="_blank" rel="noopener">Image processor (ISP)</a> · <a href="https://en.wikipedia.org/wiki/Color_depth" target="_blank" rel="noopener">Colour depth</a> · <a href="https://en.wikipedia.org/wiki/Exposure_(photography)" target="_blank" rel="noopener">Exposure</a> <i>(all Wikipedia)</i></p>
+  </aside>
+
+  <h3>Colour sensors see one colour per pixel</h3>
+  <p>A pixel cannot tell colours apart. A colour sensor puts a tiny red, green or blue filter over each pixel, in a repeating 2 × 2 layout called the <a class="t" href="#g-bayer">Bayer pattern</a>. The IMX412C's order is red, green on the first row and green, blue on the second, written RGGB. Working out full colour for every pixel from this mosaic is called <a class="t" href="#g-demosaic">demosaicing</a>.</p>
+  <figure>
+    <div class="scroll">
+    <svg class="d" viewBox="0 0 860 204" role="img" aria-label="The colour sensor's pixels follow a repeating red, green, green, blue pattern. The live preview turns each two by two block into one screen pixel. The mono sensor's pixels are all brightness values.">
+      <defs>
+        <pattern id="bay" x="20" y="36" width="68" height="68" patternUnits="userSpaceOnUse">
+          <rect x="0" y="0" width="34" height="34" fill="#d2504a" stroke="#fff" stroke-width="1"/>
+          <rect x="34" y="0" width="34" height="34" fill="#46a05c" stroke="#fff" stroke-width="1"/>
+          <rect x="0" y="34" width="34" height="34" fill="#46a05c" stroke="#fff" stroke-width="1"/>
+          <rect x="34" y="34" width="34" height="34" fill="#3f78c9" stroke="#fff" stroke-width="1"/>
+          <text class="bw c" x="17" y="22">R</text><text class="bw c" x="51" y="22">G</text>
+          <text class="bw c" x="17" y="56">G</text><text class="bw c" x="51" y="56">B</text>
+        </pattern>
+        <pattern id="mono" x="620" y="36" width="68" height="68" patternUnits="userSpaceOnUse">
+          <rect x="0" y="0" width="34" height="34" fill="#8a94a1" stroke="#fff" stroke-width="1"/>
+          <rect x="34" y="0" width="34" height="34" fill="#b3bbc5" stroke="#fff" stroke-width="1"/>
+          <rect x="0" y="34" width="34" height="34" fill="#a0a9b4" stroke="#fff" stroke-width="1"/>
+          <rect x="34" y="34" width="34" height="34" fill="#737d8a" stroke="#fff" stroke-width="1"/>
+        </pattern>
+      </defs>
+      <text class="b tco" x="20" y="22">IMX412C: one colour per pixel</text>
+      <rect x="20" y="36" width="204" height="136" fill="url(#bay)"/>
+      <rect class="ln" x="156" y="36" width="68" height="68" style="stroke-width:3"/>
+      <text class="s" x="20" y="192">the 2 × 2 block repeats: R G over G B</text>
+
+      <text class="b" x="300" y="22">One block becomes one screen pixel</text>
+      <path class="a" d="M226 70H296"/>
+      <rect x="300" y="36" width="50" height="50" fill="#d2504a"/><text class="bw c" x="325" y="59">R</text><text class="bws c" x="325" y="76">[0,0]</text>
+      <rect x="350" y="36" width="50" height="50" fill="#46a05c"/><text class="bw c" x="375" y="59">G</text><text class="bws c" x="375" y="76">[0,1]</text>
+      <rect x="300" y="86" width="50" height="50" fill="#46a05c" opacity=".35"/><text class="s c" x="325" y="115">skipped</text>
+      <rect x="350" y="86" width="50" height="50" fill="#3f78c9"/><text class="bw c" x="375" y="109">B</text><text class="bws c" x="375" y="126">[1,1]</text>
+      <path class="a" d="M404 86H446"/>
+      <rect class="ln" x="452" y="56" width="60" height="60" style="fill:#b9906a"/>
+      <text class="s c" x="482" y="132">1 colour pixel</text>
+      <text class="s" x="300" y="160">preview() takes R from the top-left pixel,</text>
+      <text class="s" x="300" y="176">G from the top-right and B from the bottom-right.</text>
+
+      <text class="b tfl" x="620" y="22">TEVS: every pixel is brightness</text>
+      <rect x="620" y="36" width="204" height="136" fill="url(#mono)"/>
+      <text class="s" x="620" y="192">labelled Bayer GRBG; treat as brightness</text>
+    </svg>
+    </div>
+    <figcaption><b>Left:</b> what the colour sensor records. <b>Middle:</b> the shortcut the live view uses, which is much cheaper than demosaicing 12 million pixels. <b>Right:</b> the FL sensor has no colour filters. Its RAW10 frames still arrive under a Bayer format name because that is the format the driver patch offers; every value is simply a brightness.</figcaption>
+  </figure>
+  <aside class="more">
+    <p><b>Read</b><a href="https://en.wikipedia.org/wiki/Bayer_filter" target="_blank" rel="noopener">Bayer filter</a> · <a href="https://en.wikipedia.org/wiki/Demosaicing" target="_blank" rel="noopener">Demosaicing</a> <i>(Wikipedia)</i></p>
+    <p><b>Watch</b><a class="v" href="https://www.youtube.com/watch?v=LWxu4rkZBLw" target="_blank" rel="noopener">Capturing Digital Images (The Bayer Filter)</a> <i>Computerphile</i> · <a class="v" href="https://www.youtube.com/watch?v=2-stCNB8jT8" target="_blank" rel="noopener">How a Pixel Gets its Color</a> <i>Michael The Maven</i></p>
+  </aside>
+
+  <h3>Ten bits stored in sixteen</h3>
+  <p>Computer memory is organised in bytes of 8 bits. A 10-bit value does not fit in one byte, so each pixel is stored in a 16-bit word (2 bytes). The value sits in the top ten bits.</p>
+  <figure>
+    <div class="scroll">
+    <svg class="d sm" viewBox="0 0 760 166" role="img" aria-label="A 16-bit word: bits 15 to 6 hold the 10-bit pixel value and bits 5 to 0 are spare.">
+      <defs><pattern id="cell" x="60" y="44" width="40" height="40" patternUnits="userSpaceOnUse"><path class="lmu" d="M39.5 0V40"/></pattern></defs>
+      <text class="s" x="64" y="36">bit 15</text><text class="s e" x="456" y="36">6</text><text class="s" x="464" y="36">5</text><text class="s e" x="696" y="36">0</text>
+      <rect class="acb" x="60" y="44" width="400" height="40"/>
+      <rect class="fsoft" x="460" y="44" width="240" height="40"/>
+      <rect x="60" y="44" width="640" height="40" fill="url(#cell)"/>
+      <text class="b c" x="260" y="69">pixel value: 10 bits, 0 to 1023</text>
+      <text class="c" x="580" y="69">6 spare bits</text>
+      <text class="m" x="60" y="112">word &gt;&gt; 6</text><text x="190" y="112">gives the value, 0 to 1023</text>
+      <text class="m" x="60" y="134">word &amp; 0xFFC0</text><text x="190" y="134">keeps the word but sets the spare bits to zero</text>
+      <text class="s" x="60" y="156">Spare bits: zeros on the Pi. On the Jetson they repeat the top six bits of the value (measured on the Orin Nano).</text>
+    </svg>
+    </div>
+    <figcaption><b>How one pixel sits in memory.</b> <code>&gt;&gt; 6</code> ("shift right by six") slides the value down past the spare bits. You will see both operations in the code: frames travel through the program as "value × 64" words and are shifted down when saved.</figcaption>
+  </figure>
+
+  <h3>How big a frame is</h3>
+  <div class="tw"><table>
+    <thead><tr><th>Camera</th><th>Size</th><th>Bytes per frame</th><th>Frame rate</th><th>Data per second</th></tr></thead>
+    <tbody>
+      <tr><td class="co">Colour</td><td class="n">4032 × 3040</td><td class="n">24,514,560 (24.5 MB)</td><td class="n">20 fps</td><td class="n">490 MB/s</td></tr>
+      <tr><td class="fl">FL</td><td class="n">1920 × 1080</td><td class="n">4,147,200 (4.1 MB)</td><td class="n">60 fps</td><td class="n">249 MB/s</td></tr>
+    </tbody>
+  </table></div>
+  <p>Bytes per frame is width × height × 2. These volumes are the reason the way frames are moved matters so much (see <a href="#pipe">Processes and pipes</a>).</p>
+
+  <h3>Format names you will meet</h3>
+  <p>Linux names each pixel layout with a four-letter code called a <a class="t" href="#g-fourcc">FourCC</a>. The four letters are packed into one 32-bit number, so <code>RG10</code> is <code>0x30314752</code>.</p>
+  <div class="tw"><table>
+    <thead><tr><th>Name</th><th>Used for</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><th><code>RG10</code></th><td>Colour camera, Jetson</td><td>10-bit Bayer, RGGB order, one 16-bit word per pixel</td></tr>
+      <tr><th><code>BA10</code></th><td>FL camera, Jetson</td><td>10-bit Bayer, GRBG order</td></tr>
+      <tr><th><code>RG16</code></th><td>Colour camera, Pi</td><td>Bayer RGGB in 16-bit words. The Pi's receiver unpacks each 10-bit pixel into 16 bits.</td></tr>
+      <tr><th><code>GR16</code></th><td>FL camera, Pi</td><td>Bayer GRBG in 16-bit words</td></tr>
+      <tr><th><code>SRGGB10_1X10</code><br><code>SGRBG10_1X10</code></th><td>Pi, in <code>media-ctl</code> commands</td><td>The same two formats as named on the cable side ("media bus codes")</td></tr>
+    </tbody>
+  </table></div>
+  <aside class="more">
+    <p><b>Read</b><a href="https://www.kernel.org/doc/html/latest/userspace-api/media/v4l/pixfmt-srggb10.html" target="_blank" rel="noopener">The kernel's definition of RG10, BA10 and the other 10-bit Bayer formats</a> · <a href="https://en.wikipedia.org/wiki/FourCC" target="_blank" rel="noopener">FourCC</a> <i>(Wikipedia)</i></p>
+  </aside>
+</section>
+
+<!-- ============================================================ 3 -->
+<section id="cable">
+  <p class="num">Section 03 · Cable</p>
+  <h2>From the sensor to the computer</h2>
+  <p>Each camera connects with a flat ribbon cable that carries two separate things.</p>
+  <ul>
+    <li><strong>Pixels</strong> travel over <a class="t" href="#g-csi2">MIPI CSI-2</a>, the standard camera link on small computers. The data moves on <a class="t" href="#g-lane">lanes</a>. A lane is one pair of wires carrying a fast serial stream. A camera can use 2 or 4 lanes at once, and more lanes carry more data per second.</li>
+    <li><strong>Settings</strong> travel over <a class="t" href="#g-i2c">I2C</a>, a slow two-wire bus. The driver uses it to identify the camera and to write values such as exposure and gain into it. Every chip on the bus has an address: the IMX412 sensor answers at <code>0x1a</code>, the TEVS at <code>0x48</code>.</li>
+  </ul>
+  <aside class="more">
+    <p><b>Read</b><a href="https://en.wikipedia.org/wiki/Camera_Serial_Interface" target="_blank" rel="noopener">Camera Serial Interface</a> <i>(Wikipedia)</i> · <a href="https://www.mipi.org/specifications/csi-2" target="_blank" rel="noopener">MIPI CSI-2 specification overview</a> <i>(MIPI Alliance)</i> · <a href="https://learn.sparkfun.com/tutorials/i2c/all" target="_blank" rel="noopener">I2C tutorial</a> <i>(SparkFun)</i> · <a href="https://en.wikipedia.org/wiki/I%C2%B2C" target="_blank" rel="noopener">I²C</a> <i>(Wikipedia)</i></p>
+    <p><b>Watch</b><a class="v" href="https://www.youtube.com/watch?v=mZ_hN4KHs8w" target="_blank" rel="noopener">Introduction: MIPI-CSI-2</a> <i>Allied Vision</i> · <a class="v" href="https://www.youtube.com/watch?v=t3oOzOScYY8" target="_blank" rel="noopener">An Introduction to MIPI D-PHY</a> (the lanes) <i>MIPI Alliance</i> · <a class="v" href="https://www.youtube.com/watch?v=DYCTwqOeHMM" target="_blank" rel="noopener">I2C protocol overview</a> <i>Texas Instruments</i></p>
+  </aside>
+
+  <h3>Why lanes set the top frame rate</h3>
+  <p>The IMX412C module runs each lane at 1350 Mbit/s. One full frame is 4032 × 3040 × 10 bits, about 123 Mbit of pixels. Two lanes can carry that about 20 times a second, four lanes about 40.</p>
+  <figure>
+    <div class="scroll">
+    <svg class="d" viewBox="0 0 900 184" role="img" aria-label="Two lanes carry 2700 megabits per second and give 20.03 frames per second at most. Four lanes carry 5400 and give 40.06.">
+      <text class="b e" x="188" y="50">2 lanes</text><text class="s e" x="188" y="65">Jetson CAM0</text>
+      <rect class="bx" x="200" y="38" width="210" height="28"/>
+      <rect class="fco" x="200" y="38" width="191" height="28"/>
+      <text class="b" x="422" y="50">20.03 fps at most</text><text class="s" x="422" y="65">2455 of 2700 Mbit/s is pixel data</text>
+
+      <text class="b e" x="188" y="110">4 lanes</text><text class="s e" x="188" y="125">Jetson CAM1, Pi</text>
+      <rect class="bx" x="200" y="98" width="420" height="28"/>
+      <rect class="fco" x="200" y="98" width="382" height="28"/>
+      <text class="b" x="632" y="110">40.06 fps at most</text><text class="s" x="632" y="125">4910 of 5400 Mbit/s is pixel data</text>
+
+      <path class="lmu" d="M200 146H620M200 146v6M305 146v6M410 146v6M515 146v6M620 146v6"/>
+      <text class="s c" x="200" y="168">0</text><text class="s c" x="305" y="168">1350</text><text class="s c" x="410" y="168">2700</text><text class="s c" x="515" y="168">4050</text><text class="s c" x="620" y="168">5400</text>
+      <text class="s" x="640" y="168">Mbit/s</text>
+    </svg>
+    </div>
+    <figcaption><b>Lane capacity against pixel data, drawn to scale.</b> The outline is what the lanes can carry. The filled part is the pixel data at the frame rate the driver allows; the rest is the gaps between lines and frames. The frame-rate limits are the driver's own table, printed in the kernel log when it starts.</figcaption>
+  </figure>
+  <p>On the Jetson Orin Nano board, the CAM0 connector has only 2 lanes and CAM1 has 4. The colour camera is on CAM0 today, which is why it tops out at 20 fps there. Swapping the two cables and reinstalling with <code>sudo bash jetson/install.sh --imx412-on cam1</code> gives it 4 lanes. That puts the TEVS on 2 lanes. <span class="tag u">untested</span></p>
+</section>
+
+<!-- ============================================================ 4 -->
+<section id="linux">
+  <p class="num">Section 04 · Kernel driver</p>
+  <h2>Inside Linux</h2>
+  <p>The <a class="t" href="#g-kernel">kernel</a> is the core of the operating system. It is the only software allowed to talk to hardware. Everything else, including Python, the terminal and our UI, is an ordinary program that has to ask the kernel for what it needs.</p>
+  <ul>
+    <li>A <a class="t" href="#g-driver">driver</a> is the piece of kernel code that knows how to run one kind of device. Each camera has its own.</li>
+    <li>Our drivers are <a class="t" href="#g-module">kernel modules</a>: files ending in <code>.ko</code> that the kernel loads when it boots, such as <code>tevs.ko</code> and <code>vc_mipi_camera.ko</code>.</li>
+    <li>At boot each driver <a class="t" href="#g-probe">probes</a>: it checks over I2C that its camera answers. The result goes into the kernel log, which you read with <code>dmesg</code> or <code>journalctl -k</code>.</li>
+  </ul>
+  <aside class="more">
+    <p><b>Read</b><a href="https://en.wikipedia.org/wiki/Kernel_(operating_system)" target="_blank" rel="noopener">Kernel</a> · <a href="https://en.wikipedia.org/wiki/Loadable_kernel_module" target="_blank" rel="noopener">Loadable kernel module</a> <i>(Wikipedia)</i> · <a href="https://www.kernel.org/doc/html/latest/kbuild/modules.html" target="_blank" rel="noopener">Building external modules</a> <i>(kernel docs; what our build scripts do)</i> · <a href="https://man7.org/linux/man-pages/man1/dmesg.1.html" target="_blank" rel="noopener">dmesg(1)</a></p>
+    <p><b>Watch</b><a class="v" href="https://www.youtube.com/watch?v=4tgluSJDA_E" target="_blank" rel="noopener">Let's code a Linux Driver 1: Hello World Linux Kernel Module</a> <i>Johannes 4GNU_Linux</i></p>
+  </aside>
+
+  <h3>The device tree: telling the kernel a camera exists</h3>
+  <p>A camera on a ribbon cable cannot announce itself. The kernel learns it is there from the <a class="t" href="#g-dt">device tree</a>, a description of the board's hardware: which port, how many lanes, which I2C address. An <a class="t" href="#g-dt">overlay</a> is a small add-on to the device tree. Ours adds the two cameras. Source files end in <code>.dts</code> and are compiled to <code>.dtbo</code>.</p>
+  <aside class="more">
+    <p><b>Read</b><a href="https://www.kernel.org/doc/html/latest/devicetree/usage-model.html" target="_blank" rel="noopener">Linux and the Devicetree</a> <i>(kernel docs)</i> · <a href="https://www.devicetree.org/" target="_blank" rel="noopener">devicetree.org</a> · <a href="https://www.raspberrypi.com/documentation/computers/configuration.html" target="_blank" rel="noopener">Device trees, overlays and parameters</a> <i>(Raspberry Pi docs, on the Configuration page)</i></p>
+    <p><b>Watch</b><a class="v" href="https://www.youtube.com/watch?v=m_NyYEBxfn8" target="_blank" rel="noopener">Device Tree for Dummies!</a> <i>Thomas Petazzoni, The Linux Foundation</i> · <a class="v" href="https://www.youtube.com/watch?v=fD7a6WsyJgo" target="_blank" rel="noopener">Device Tree 101</a> <i>Bootlin</i></p>
+  </aside>
+
+  <h3>Devices appear as files</h3>
+  <p>Linux presents each device as a <a class="t" href="#g-devfile">device file</a> under <code>/dev</code>. A program opens the file and sends commands to it. A camera shows up as up to three kinds of file.</p>
+  <figure>
+    <div class="scroll">
+    <svg class="d" viewBox="0 0 920 244" role="img" aria-label="On the Pi the sensor, receiver and capture stages are separate entities linked through a media device. On the Jetson one video node per camera handles format and frames.">
+      <rect class="bg" x="10" y="10" width="440" height="224" rx="8"/>
+      <rect class="bg" x="470" y="10" width="440" height="224" rx="8"/>
+      <text class="b" x="26" y="34">Raspberry Pi 5 / CM5</text>
+      <text class="s" x="26" y="52">/dev/mediaN holds this map; media-ctl edits it</text>
+      <text class="b" x="486" y="34">Jetson Orin Nano</text>
+      <text class="s" x="486" y="52">no wiring step; names are looked up from /dev/media0</text>
+
+      <rect class="cob" x="26" y="72" width="124" height="60" rx="6"/><text class="b c" x="88" y="97">sensor</text><text class="m c" x="88" y="116">vc_mipi_camera</text>
+      <rect class="bx" x="168" y="72" width="124" height="60" rx="6"/><text class="b c" x="230" y="97">receiver</text><text class="m c" x="230" y="116">csi2</text>
+      <rect class="bx" x="310" y="72" width="124" height="60" rx="6"/><text class="b c" x="372" y="97">capture</text><text class="m c" x="372" y="116">rp1-cfe-csi2_ch0</text>
+      <path class="a" d="M150 102H167"/>
+      <path class="a dsh" d="M292 102H309"/>
+      <text class="m c" x="88" y="154">/dev/v4l-subdevN</text><text class="s c" x="88" y="170">settings, crop</text>
+      <text class="s c" x="230" y="154">link to capture is</text><text class="s c" x="230" y="170">off after each boot</text>
+      <text class="m c" x="372" y="154">/dev/videoN</text><text class="s c" x="372" y="170">format, frames</text>
+      <text class="s" x="26" y="206">start() switches the link on and sets the same</text>
+      <text class="s" x="26" y="222">format on all three, then crops on the sensor.</text>
+
+      <rect class="cob" x="486" y="72" width="124" height="60" rx="6"/><text class="b c" x="548" y="97">sensor</text><text class="m c" x="548" y="116">vc_mipi 10-001a</text>
+      <rect class="bx" x="628" y="72" width="124" height="60" rx="6"/><text class="b c" x="690" y="97">receiver</text><text class="m c" x="690" y="116">NVIDIA nvcsi</text>
+      <rect class="bx" x="770" y="72" width="124" height="60" rx="6"/><text class="b c" x="832" y="97">capture</text><text class="m c" x="832" y="116">vi-output</text>
+      <path class="a" d="M610 102H627"/>
+      <path class="a" d="M752 102H769"/>
+      <text class="m c" x="548" y="154">/dev/v4l-subdev0</text><text class="s c" x="548" y="170">settings</text>
+      <text class="m c" x="832" y="154">/dev/video0</text><text class="s c" x="832" y="170">format, frames</text>
+      <text class="s" x="486" y="206">start_jetson() sets the format once on the video node.</text>
+      <text class="s" x="486" y="222">The sensor always sends the full frame; we crop in Python.</text>
+    </svg>
+    </div>
+    <figcaption><b>The colour camera's device files on each computer.</b> The FL camera looks the same with its own names. The name <code>vc_mipi 10-001a</code> reads as: driver <code>vc_mipi</code>, I2C bus 10, address <code>0x1a</code>. The numbers in <code>/dev/videoN</code> can change between boots, so the code finds cameras by name (<code>find_camera()</code> in <code>vc/imx412.py</code> and <code>vc/tegra.py</code>).</figcaption>
+  </figure>
+  <div class="tw"><table>
+    <thead><tr><th>File</th><th>Called</th><th>What it is for</th></tr></thead>
+    <tbody>
+      <tr><th><code>/dev/videoN</code></th><td>Video node</td><td>Where a program sets the frame format and collects frames</td></tr>
+      <tr><th><code>/dev/v4l-subdevN</code></th><td><a class="t" href="#g-subdev">Sub-device</a></td><td>The sensor itself. Its settings live here.</td></tr>
+      <tr><th><code>/dev/mediaN</code></th><td><a class="t" href="#g-media">Media device</a></td><td>The map of how sensor, receiver and video node are connected</td></tr>
+    </tbody>
+  </table></div>
+  <aside class="more">
+    <p><b>Read</b><a href="https://en.wikipedia.org/wiki/Device_file" target="_blank" rel="noopener">Device file</a> <i>(Wikipedia)</i> · <a href="https://www.kernel.org/doc/html/latest/userspace-api/media/v4l/dev-subdev.html" target="_blank" rel="noopener">Sub-device interface</a> · <a href="https://www.kernel.org/doc/html/latest/userspace-api/media/mediactl/media-controller.html" target="_blank" rel="noopener">Media Controller API</a> <i>(kernel docs)</i></p>
+    <p><b>Watch</b><a class="v" href="https://www.youtube.com/watch?v=mso8R_k_qw8" target="_blank" rel="noopener">Camera/ISP Drivers Using V4L2 Media Controller Framework</a> <i>Karthik Poduval, The Linux Foundation (a conference talk; more advanced)</i></p>
+  </aside>
+
+  <h3>V4L2 and ioctl</h3>
+  <p><a class="t" href="#g-v4l2">V4L2</a> (Video4Linux2) is the kernel's standard interface for cameras. Every camera driver answers the same set of commands, so one program can drive any camera.</p>
+  <p>When a program opens a device file, the kernel hands back a <a class="t" href="#g-fd">file descriptor</a>: a small number that stands for the open file. To send a command, the program calls <a class="t" href="#g-ioctl">ioctl</a> ("I/O control") with three things: the file descriptor, a request code saying which command, and a block of bytes holding the command's data. The kernel can write results back into the same block.</p>
+  <figure>
+    <div class="scroll">
+    <svg class="d sm" viewBox="0 0 760 150" role="img" aria-label="The 32-bit ioctl request code for set format is built from four fields: direction 3, size 208 bytes, type V and number 5, giving 0xC0D05605.">
+      <text class="s" x="60" y="20">direction: 3 means the data goes in and comes back</text>
+      <path class="lmu" d="M80 26V48"/>
+      <rect class="acb" x="60" y="50" width="40" height="40"/><text class="b c" x="80" y="75">3</text>
+      <rect class="bx" x="100" y="50" width="280" height="40"/><text class="c" x="240" y="75">size of the data: 208 bytes</text>
+      <rect class="bx" x="380" y="50" width="160" height="40"/><text class="c" x="460" y="75">type: 'V' (all V4L2)</text>
+      <rect class="bx" x="540" y="50" width="160" height="40"/><text class="c" x="620" y="75">command number: 5</text>
+      <text class="s c" x="80" y="106">bits 31–30</text><text class="s c" x="240" y="106">29–16</text><text class="s c" x="460" y="106">15–8</text><text class="s c" x="620" y="106">7–0</text>
+      <text class="mb" x="60" y="134">= 0xC0D05605</text><text x="170" y="134">which is VIDIOC_S_FMT, the "set format" command</text>
+    </svg>
+    </div>
+    <figcaption><b>A request code is four fields packed into one 32-bit number.</b> You never compute it by hand; it is a constant that matches the kernel's own. <code>documentation.md</code> in the repo walks through this call line by line.</figcaption>
+  </figure>
+  <aside class="more">
+    <p><b>Read</b><a href="https://www.kernel.org/doc/html/latest/userspace-api/media/v4l/v4l2.html" target="_blank" rel="noopener">Video for Linux API</a> <i>(the kernel's V4L2 reference)</i> · <a href="https://en.wikipedia.org/wiki/Video4Linux" target="_blank" rel="noopener">Video4Linux</a> <i>(Wikipedia)</i> · <a href="https://man7.org/linux/man-pages/man2/ioctl.2.html" target="_blank" rel="noopener">ioctl(2) manual page</a> · <a href="https://en.wikipedia.org/wiki/Ioctl" target="_blank" rel="noopener">ioctl</a> · <a href="https://en.wikipedia.org/wiki/File_descriptor" target="_blank" rel="noopener">File descriptor</a> <i>(Wikipedia)</i></p>
+  </aside>
+
+  <h3>Controls: the camera's settings</h3>
+  <p>A <a class="t" href="#g-control">control</a> is a named number you can read or change on a camera. The names and units differ between the two cameras and, for the colour camera, between the two computers.</p>
+  <div class="tw"><table>
+    <thead><tr><th>Control</th><th>Camera</th><th>Unit and meaning</th></tr></thead>
+    <tbody>
+      <tr><th><code>exposure</code></th><td>Both</td><td>Microseconds (µs). <code>30000</code> is 30 ms.</td></tr>
+      <tr><th><code>exposure_mode</code></th><td class="fl">FL</td><td>0 is manual, 1 is automatic. It must be 0 or the camera ignores <code>exposure</code>.</td></tr>
+      <tr><th><code>gain</code></th><td class="fl">FL</td><td>A plain multiplier, 1 to 64</td></tr>
+      <tr><th><code>max_fps</code></th><td class="fl">FL, Jetson</td><td>Frame rate cap. On the Pi the frame rate is part of the format instead.</td></tr>
+      <tr><th><code>analogue_gain</code></th><td class="co">Colour, Pi</td><td>Thousandths of a <a class="t" href="#g-db">decibel</a> (mdB), 0 to 48000. 6000 is about 2×.</td></tr>
+      <tr><th><code>gain</code></th><td class="co">Colour, Jetson</td><td>0 to 48000, spread evenly over the sensor's gain register 0 to 1023. The real amplification is 1024 ÷ (1024 − register), so the UI asks for the multiplier and converts.</td></tr>
+      <tr><th><code>frame_rate</code></th><td class="co">Colour</td><td>Thousandths of a hertz (mHz). <code>20000</code> is 20 fps. <code>0</code> means as fast as possible.</td></tr>
+      <tr><th><code>binning_mode</code>, <code>black_level</code>, <code>io_mode</code></th><td class="co">Colour, Pi only</td><td>Not offered by our Jetson build of the driver (see <a href="#drivers">Drivers</a>)</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>Two command-line tools</h3>
+  <p><a class="t" href="#g-v4l2ctl">v4l2-ctl</a> is a ready-made program that speaks V4L2. <code>media-ctl</code> shows and edits the media map. They are the quickest way to check a camera without any of our code.</p>
+<pre><code>v4l2-ctl --list-devices                         # which cameras exist and their /dev/video numbers
+v4l2-ctl -d /dev/video0 -l                      # list a camera's controls with ranges and current values
+v4l2-ctl -d /dev/v4l-subdev1 -c exposure=4000   # change one control
+v4l2-ctl -d /dev/video0 --stream-mmap --stream-count=100   # grab 100 frames and print the frame rate
+media-ctl -d /dev/media0 -p                     # print the media map
+journalctl -k -b | grep -iE "vc_mipi|tevs"      # what the drivers said at boot</code></pre>
+  <aside class="more">
+    <p><b>Read</b><a href="https://manpages.ubuntu.com/manpages/noble/man1/v4l2-ctl.1.html" target="_blank" rel="noopener">v4l2-ctl manual page</a> · <a href="https://www.kernel.org/doc/html/latest/userspace-api/media/v4l/control.html" target="_blank" rel="noopener">User controls</a> <i>(kernel docs)</i> · <a href="https://en.wikipedia.org/wiki/Decibel" target="_blank" rel="noopener">Decibel</a> <i>(Wikipedia)</i></p>
+  </aside>
+</section>
+
+<!-- ============================================================ 5 -->
+<section id="streaming">
+  <p class="num">Section 05 · Buffers</p>
+  <h2>Getting frames: the streaming loop</h2>
+  <p>Three ideas explain how frames leave the kernel.</p>
+  <ul>
+    <li>A <a class="t" href="#g-buffer">buffer</a> is a block of memory big enough for one frame. The driver keeps a small set of them. We ask for four.</li>
+    <li><a class="t" href="#g-mmap">mmap</a> (memory mapping) makes the driver's buffers visible inside our program's memory. Nothing is copied. The kernel and our program look at the same bytes.</li>
+    <li>To <strong>queue</strong> a buffer is to hand it to the driver, empty, to be filled. To <strong>dequeue</strong> is to take back one the driver has filled.</li>
+  </ul>
+  <figure>
+    <div class="scroll">
+    <svg class="d" viewBox="0 0 950 312" role="img" aria-label="Setup happens once: open, set format, request four buffers, map them, queue them, start streaming. Then a loop runs for every frame: wait, dequeue, copy the frame out, queue the buffer again.">
+      <text class="b" x="20" y="24">Once, when a camera starts: open_capture()</text>
+      <rect class="bx" x="20" y="36" width="136" height="44" rx="6"/><text class="c" x="88" y="55">open the device</text><text class="m c" x="88" y="71">os.open</text>
+      <rect class="bx" x="176" y="36" width="136" height="44" rx="6"/><text class="c" x="244" y="55">set the format</text><text class="m c" x="244" y="71">S_FMT</text>
+      <rect class="bx" x="332" y="36" width="136" height="44" rx="6"/><text class="c" x="400" y="55">ask for 4 buffers</text><text class="m c" x="400" y="71">REQBUFS</text>
+      <rect class="bx" x="488" y="36" width="136" height="44" rx="6"/><text class="c" x="556" y="55">map them</text><text class="m c" x="556" y="71">QUERYBUF + mmap</text>
+      <rect class="bx" x="644" y="36" width="136" height="44" rx="6"/><text class="c" x="712" y="55">queue all 4</text><text class="m c" x="712" y="71">QBUF</text>
+      <rect class="bx" x="800" y="36" width="136" height="44" rx="6"/><text class="c" x="868" y="55">start streaming</text><text class="m c" x="868" y="71">STREAMON</text>
+      <path class="a" d="M156 58H175"/><path class="a" d="M312 58H331"/><path class="a" d="M468 58H487"/><path class="a" d="M624 58H643"/><path class="a" d="M780 58H799"/>
+      <path class="a" d="M868 80V116H105V151"/>
+
+      <text class="b" x="130" y="140">Then, for every frame: run()</text>
+      <rect class="acb" x="20" y="152" width="170" height="44" rx="6"/><text class="c" x="105" y="171">wait for a frame</text><text class="m c" x="105" y="187">select(), 0.2 s at most</text>
+      <rect class="acb" x="230" y="152" width="170" height="44" rx="6"/><text class="c" x="315" y="171">take the filled buffer</text><text class="m c" x="315" y="187">DQBUF</text>
+      <rect class="acb" x="440" y="152" width="170" height="44" rx="6"/><text class="c" x="525" y="171">copy the frame out</text><text class="m c" x="525" y="187">cam["unpack"]</text>
+      <rect class="acb" x="650" y="152" width="170" height="44" rx="6"/><text class="c" x="735" y="171">hand the buffer back</text><text class="m c" x="735" y="187">QBUF</text>
+      <path class="a" d="M190 174H229"/><path class="a" d="M400 174H439"/><path class="a" d="M610 174H649"/>
+      <path class="a" d="M735 196V236H105V197"/>
+      <text class="s c" x="420" y="229">next frame</text>
+
+      <path class="amu" d="M60 196V281H231"/>
+      <text class="s" x="70" y="258">when the stop flag is set</text>
+      <rect class="bx" x="232" y="262" width="328" height="38" rx="6"/><text class="c" x="396" y="285">close(): stream off, unmap, close the file</text>
+    </svg>
+    </div>
+    <figcaption><b>The V4L2 capture sequence our code follows.</b> The short names under each step are the ioctl commands; each is really prefixed <code>VIDIOC_</code>. On the Jetson the format is set just before this by a <code>v4l2-ctl</code> call, so <code>open_capture()</code> skips the second step there. The class that issues these commands is Vision Components' example, kept in <code>vc/v4l2_capture.py</code>.</figcaption>
+  </figure>
+
+  <figure>
+    <div class="scroll">
+    <svg class="d sm" viewBox="0 0 760 190" role="img" aria-label="Four buffers circulate. Three are with the driver being filled or waiting; one is with our program, which copies the frame out and returns the buffer.">
+      <rect class="band" x="20" y="24" width="310" height="146" rx="8"/><text class="cap" x="36" y="48">DRIVER (KERNEL)</text>
+      <rect class="band2" x="430" y="24" width="310" height="146" rx="8"/><text class="cap" x="446" y="48">OUR PROGRAM</text>
+      <rect class="bx" x="40" y="74" width="80" height="44" rx="5"/><text class="c" x="80" y="100">buffer 0</text><text class="s c" x="80" y="136">being filled</text>
+      <rect class="bx" x="135" y="74" width="80" height="44" rx="5"/><text class="c" x="175" y="100">buffer 1</text><text class="s c" x="175" y="136">waiting</text>
+      <rect class="bx" x="230" y="74" width="80" height="44" rx="5"/><text class="c" x="270" y="100">buffer 3</text><text class="s c" x="270" y="136">waiting</text>
+      <rect class="acb" x="450" y="74" width="80" height="44" rx="5"/><text class="c" x="490" y="100">buffer 2</text><text class="s c" x="490" y="136">full, being read</text>
+      <path class="a" d="M530 96H599"/><text class="s c" x="565" y="88">copy</text>
+      <rect class="bx" x="600" y="74" width="124" height="44" rx="5"/><text class="mb c" x="662" y="100">cam["last"]</text><text class="s c" x="662" y="136">our own copy</text>
+      <path class="a" d="M330 82H429"/><text class="m c" x="380" y="74">DQBUF</text>
+      <path class="a" d="M430 112H331"/><text class="m c" x="380" y="130">QBUF</text>
+    </svg>
+    </div>
+    <figcaption><b>Who holds the buffers at one moment.</b> The driver refills a buffer as soon as it gets it back, so we copy the frame out first. That one copy is the only time the 24.5 MB moves.</figcaption>
+  </figure>
+
+  <p>The loop itself is short. This is <code>run()</code> in <code>dual_stream.py</code>, without the preview lines:</p>
+<pre><code>def run(name, cam):                       # one thread per camera
+    cap = cam["cap"]
+    while not cam["stop"].is_set():
+        if not select.select([cap.fd], [], [], 0.2)[0]:   # no frame yet: check the stop flag again
+            continue
+        index, _ = cap.dequeue_buffer()
+        frame = cam["unpack"](cap.buffers[index]["mem"])  # a copy
+        cap.queue_buffer(index)                           # the buffer goes straight back to the driver
+        cam["last"], cam["frames"] = frame, cam["frames"] + 1</code></pre>
+  <p><a class="t" href="#g-select">select()</a> asks the kernel "is a frame ready on this file?" and waits at most 0.2 seconds for the answer. Without the time limit, a camera that stopped sending would leave the thread waiting forever and the program could not shut down.</p>
+  <aside class="more">
+    <p><b>Read</b><a href="https://www.kernel.org/doc/html/latest/userspace-api/media/v4l/mmap.html" target="_blank" rel="noopener">Streaming I/O (memory mapping)</a> · <a href="https://www.kernel.org/doc/html/latest/userspace-api/media/v4l/buffer.html" target="_blank" rel="noopener">Buffers</a> <i>(kernel docs; the exact sequence in the figure)</i> · <a href="https://man7.org/linux/man-pages/man2/mmap.2.html" target="_blank" rel="noopener">mmap(2)</a> · <a href="https://man7.org/linux/man-pages/man2/select.2.html" target="_blank" rel="noopener">select(2)</a> · Python's <a href="https://docs.python.org/3/library/mmap.html" target="_blank" rel="noopener">mmap</a> and <a href="https://docs.python.org/3/library/select.html" target="_blank" rel="noopener">select</a> modules</p>
+    <p><b>Watch</b><a class="v" href="https://www.youtube.com/watch?v=m7E9piHcfr4" target="_blank" rel="noopener">How to Map Files into Memory in C (mmap, memory mapped file io)</a> <i>Jacob Sorber</i></p>
+  </aside>
+</section>
+
+<!-- ============================================================ 6 -->
+<section id="pipe">
+  <p class="num">Section 06</p>
+  <h2>Processes, subprocess and pipes</h2>
+  <p>Until 10 November 2026 the code did not read buffers itself. It started <code>v4l2-ctl</code> and read the frames from that program's output. Understanding why that was slow needs four terms.</p>
+  <ul>
+    <li>A program is a file on disk. A <a class="t" href="#g-process">process</a> is a running copy of a program, with its own private memory. Two processes cannot see each other's memory.</li>
+    <li><a class="t" href="#g-subprocess">subprocess</a> is Python's standard module for starting another program from Python. <code>subprocess.run([...])</code> starts it and waits for it to finish. <code>subprocess.Popen([...])</code> starts it and lets it keep running alongside.</li>
+    <li>Every process has a <a class="t" href="#g-stdout">standard output</a> (stdout): the stream its printed output goes to. Normally that is the terminal.</li>
+    <li>A <a class="t" href="#g-pipe">pipe</a> is a one-way channel, provided by the kernel, that connects one process's output to another process's input. In a terminal you make one with <code>|</code>, as in <code>dmesg | grep tevs</code>. The kernel holds the bytes in transit in a buffer of 65,536 bytes. When it is full, the writing process is paused until the reader takes some out.</li>
+  </ul>
+  <aside class="more">
+    <p><b>Read</b><a href="https://man7.org/linux/man-pages/man7/pipe.7.html" target="_blank" rel="noopener">pipe(7) manual page</a> <i>(capacity, and what happens when a pipe is full)</i> · <a href="https://en.wikipedia.org/wiki/Pipeline_(Unix)" target="_blank" rel="noopener">Pipeline (Unix)</a> <i>(Wikipedia)</i> · <a href="https://docs.python.org/3/library/subprocess.html" target="_blank" rel="noopener">Python subprocess module</a></p>
+    <p><b>Watch</b><a class="v" href="https://www.youtube.com/watch?v=bKzonnwoR2I" target="_blank" rel="noopener">Unix Pipeline (Brian Kernighan)</a> <i>Computerphile</i> · <a class="v" href="https://www.youtube.com/watch?v=2Fp1N6dof0Y" target="_blank" rel="noopener">Calling External Commands Using the Subprocess Module</a> <i>Corey Schafer</i></p>
+  </aside>
+
+  <figure>
+    <div class="scroll">
+    <svg class="d" viewBox="0 0 950 312" role="img" aria-label="Before: frames went from the driver through v4l2-ctl and a pipe into Python, with three copies, and 8.2 frames per second arrived. Now: Python reads the driver's buffers directly with one copy and about 20 frames per second arrive.">
+      <text class="b" x="20" y="26">Before: every frame through a pipe</text>
+      <text class="b e tbad" x="930" y="26">8.2 fps reached Python</text>
+      <rect class="cob" x="20" y="44" width="160" height="60" rx="6"/><text class="b c" x="100" y="65">driver buffers</text><text class="m c" x="100" y="82">/dev/video0</text><text class="s c" x="100" y="97">20.05 fps here</text>
+      <rect class="bx" x="236" y="44" width="190" height="60" rx="6"/><text class="mb c" x="331" y="70">v4l2-ctl --stream-to=-</text><text class="s c" x="331" y="90">a second process</text>
+      <rect class="fsoft" x="482" y="62" width="120" height="24" rx="12" style="stroke:var(--bad);stroke-width:1.5"/><text class="b c" x="542" y="54">pipe</text><text class="s c" x="542" y="102">holds 65,536 bytes</text>
+      <rect class="bx" x="650" y="44" width="160" height="60" rx="6"/><text class="b c" x="730" y="65">Python</text><text class="m c" x="730" y="82">stdout.read()</text><text class="s c" x="730" y="97">rebuilds 24.5 MB</text>
+      <rect class="bx" x="866" y="44" width="74" height="60" rx="6"/><text class="c" x="903" y="79">frame</text>
+      <path class="a" d="M180 74H235"/><path class="a" d="M426 74H481"/><path class="a" d="M602 74H649"/><path class="a" d="M810 74H865"/>
+      <text class="s c" x="454" y="66">copy 1</text><text class="s c" x="626" y="66">copy 2</text><text class="s c" x="838" y="66">copy 3</text>
+      <text class="s" x="20" y="128">One frame is 24,514,560 bytes, so it crosses the pipe in about 374 fills. When Python falls behind, v4l2-ctl is paused,</text>
+      <text class="s" x="20" y="144">stops handing buffers back to the driver, and the sensor's next frames are thrown away.</text>
+
+      <path class="lmu" d="M20 166H930"/>
+      <text class="b" x="20" y="196">Now: read the frame where it already is</text>
+      <text class="b e tgood" x="930" y="196">19.8 to 20.4 fps reach Python</text>
+      <rect class="cob" x="20" y="214" width="160" height="60" rx="6"/><text class="b c" x="100" y="235">driver buffers</text><text class="m c" x="100" y="252">/dev/video0</text><text class="s c" x="100" y="267">20.05 fps here</text>
+      <rect class="acb" x="300" y="214" width="300" height="60" rx="6"/><text class="b c" x="450" y="235">Python capture thread</text><text class="m c" x="450" y="252">mmap: the same memory, seen from Python</text><text class="s c" x="450" y="267">no second process, no pipe</text>
+      <rect class="bx" x="866" y="214" width="74" height="60" rx="6"/><text class="c" x="903" y="249">frame</text>
+      <path class="ln" d="M182 244H298" marker-start="url(#ar)" marker-end="url(#ar)"/><text class="s c" x="240" y="236">DQBUF / QBUF</text>
+      <path class="a" d="M600 244H865"/><text class="s c" x="733" y="236">one copy: crop and mask in the same pass</text>
+      <text class="s" x="20" y="300">Colour camera at 4032 × 3040 on the Jetson, with both cameras and the preview running.</text>
+    </svg>
+    </div>
+    <figcaption><b>The change made on 10 November 2026.</b> The measurements show that the frames were lost at the pipe. The explanation of why (small buffer, extra copies, the stalled writer) is reasoning from how pipes work; those three effects were not timed separately.</figcaption>
+  </figure>
+
+  <figure>
+    <div class="scroll">
+    <svg class="d" viewBox="0 0 860 226" role="img" aria-label="Measured frame rates: driver alone 20.05, pipe alone 15.4 to 16.3, pipe with both cameras and preview 8.2, direct read with both cameras and preview 19.8.">
+      <path class="lmu dsh" d="M730.6 22V200"/>
+      <text class="s e" x="724" y="16">20.03 fps: the 2-lane limit</text>
+      <text class="e" x="298" y="47">Driver alone, nothing reading</text>
+      <rect class="fmu" x="310" y="30" width="421" height="24"/><text class="b" x="741" y="47">20.05</text>
+      <text class="e" x="298" y="91">Pipe, nothing else running</text>
+      <rect class="fbadl" x="310" y="74" width="342" height="24"/><rect class="fbad" x="310" y="74" width="323" height="24"/><text class="b" x="662" y="91">15.4 to 16.3</text>
+      <text class="e" x="298" y="135">Pipe, both cameras + preview (before)</text>
+      <rect class="fbad" x="310" y="118" width="172" height="24"/><text class="b" x="492" y="135">8.2</text>
+      <text class="e" x="298" y="179">Direct read, both cameras + preview (now)</text>
+      <rect class="fgood" x="310" y="162" width="416" height="24"/><text class="b" x="741" y="179">19.8</text>
+      <path class="lmu" d="M310 200H730M310 200v5M415 200v5M520 200v5M625 200v5M730 200v5"/>
+      <text class="s c" x="310" y="219">0</text><text class="s c" x="415" y="219">5</text><text class="s c" x="520" y="219">10</text><text class="s c" x="625" y="219">15</text><text class="s c" x="730" y="219">20</text>
+      <text class="s" x="752" y="219">frames per second</text>
+    </svg>
+    </div>
+    <figcaption><b>Colour camera frame rate by how the frames are read</b>, measured on the Jetson at full frame. <span class="tag m">measured</span></figcaption>
+  </figure>
+
+  <h3>Where subprocess is still used, and why that is fine</h3>
+  <p>Settings still go through <code>v4l2-ctl</code> and <code>media-ctl</code>, started with <code>subprocess.run</code>. Each call carries a few bytes and happens only when you change something, so its cost does not matter:</p>
+<pre><code>subprocess.run(["v4l2-ctl", "-d", cam["subdev"], "-c", f"exposure={us}"])</code></pre>
+  <p>One frame path still uses a pipe: <code>camera_API.py</code>, the VizionSDK route on the Pi. It streams 1280 × 720 at 30 fps, about 55 MB/s, roughly a ninth of the colour camera's volume. Its speed has not been measured.</p>
+
+  <h3>Threads</h3>
+  <p>A <a class="t" href="#g-thread">thread</a> is a second line of execution inside one process. Threads share the process's memory, so no pipe is needed between them. Each camera gets its own capture thread, so one camera never waits for the other, and the window runs on the main thread so it stays responsive. A <code>threading.Event</code> is the stop flag: <code>close()</code> sets it, then <code>join()</code> waits for the thread to finish before the buffers are released.</p>
+  <aside class="more">
+    <p><b>Read</b><a href="https://docs.python.org/3/library/threading.html" target="_blank" rel="noopener">Python threading module</a> <i>(Thread, Event, join)</i> · <a href="https://en.wikipedia.org/wiki/Thread_(computing)" target="_blank" rel="noopener">Thread</a> <i>(Wikipedia)</i></p>
+    <p><b>Watch</b><a class="v" href="https://www.youtube.com/watch?v=IEEhzQoKtQU" target="_blank" rel="noopener">Python Threading Tutorial: Run Code Concurrently Using the Threading Module</a> <i>Corey Schafer</i></p>
+  </aside>
+</section>
+
+<!-- ============================================================ 7 -->
+<section id="code">
+  <p class="num">Section 07 · Python thread</p>
+  <h2>The code</h2>
+  <figure>
+    <div class="scroll">
+    <svg class="d" viewBox="0 0 930 366" role="img" aria-label="camera_ui.py uses dual_stream.py; capture_raw10.py uses vc/imx412.py; both use the shared capture helpers v4l2_capture and tegra, which talk to Linux. check_raw10.py uses camera_API.py, which uses vizion_cm5.py and pyvizionsdk.">
+      <text class="cap" x="20" y="22">YOU RUN</text><text class="cap" x="270" y="22">OUR MODULES</text><text class="cap" x="530" y="22">HELPERS</text><text class="cap" x="770" y="22">OUTSIDE OUR CODE</text>
+
+      <rect class="bx" x="20" y="40" width="204" height="44" rx="6"/><text class="mb" x="34" y="59">camera_ui.py</text><text class="s" x="34" y="75">the window</text>
+      <rect class="bx" x="20" y="170" width="204" height="44" rx="6"/><text class="mb" x="34" y="189">scripts/capture_raw10.py</text><text class="s" x="34" y="205">colour frames from a terminal</text>
+      <rect class="bx" x="20" y="300" width="204" height="44" rx="6"/><text class="mb" x="34" y="319">check_raw10.py</text><text class="s" x="34" y="335">are all 10 bits used?</text>
+
+      <rect class="acb" x="270" y="40" width="200" height="44" rx="6"/><text class="mb" x="284" y="59">dual_stream.py</text><text class="s" x="284" y="75">start, run, preview, close</text>
+      <rect class="acb" x="270" y="170" width="200" height="44" rx="6"/><text class="mb" x="284" y="189">vc/imx412.py</text><text class="s" x="284" y="205">Camera, Mode, save, to_rgb8</text>
+      <rect class="acb" x="270" y="300" width="200" height="44" rx="6"/><text class="mb" x="284" y="319">camera_API.py</text><text class="s" x="284" y="335">VizionSDK plus RAW10 (Pi)</text>
+
+      <rect class="grp" x="530" y="56" width="190" height="124" rx="8"/>
+      <rect class="bx" x="542" y="68" width="166" height="44" rx="6"/><text class="mb" x="554" y="87">vc/v4l2_capture.py</text><text class="s" x="554" y="103">ioctl + mmap capture</text>
+      <rect class="bx" x="542" y="124" width="166" height="44" rx="6"/><text class="mb" x="554" y="143">vc/tegra.py</text><text class="s" x="554" y="159">Jetson: find, format, crop</text>
+      <rect class="bx" x="530" y="196" width="190" height="44" rx="6"/><text class="mb" x="544" y="215">vc/vc_controls.py</text><text class="s" x="544" y="231">control IDs for the Pi driver</text>
+      <rect class="bx" x="530" y="300" width="190" height="44" rx="6"/><text class="mb" x="544" y="319">vizion_cm5.py</text><text class="s" x="544" y="335">CM5 workaround</text>
+
+      <rect class="band" x="770" y="56" width="140" height="184" rx="8"/>
+      <text class="b c" x="840" y="92">Linux</text>
+      <text class="m c" x="840" y="116">/dev/video*</text><text class="m c" x="840" y="134">/dev/v4l-subdev*</text><text class="m c" x="840" y="152">/dev/media*</text>
+      <text class="m c" x="840" y="184">v4l2-ctl</text><text class="m c" x="840" y="202">media-ctl</text>
+      <rect class="band" x="770" y="300" width="140" height="44" rx="6"/><text class="mb c" x="840" y="319">pyvizionsdk</text><text class="s c" x="840" y="335">TechNexion's library</text>
+
+      <path class="a" d="M224 62H269"/><path class="a" d="M224 192H269"/><path class="a" d="M224 322H269"/>
+      <path class="a" d="M470 62L529 98"/>
+      <path class="a" d="M470 185L529 142"/>
+      <path class="a" d="M470 200L529 216"/>
+      <path class="a" d="M470 322H529"/><path class="a" d="M720 118H769"/><path class="a" d="M720 218H769"/><path class="a" d="M720 322H769"/>
+      <path class="a dsh" d="M440 300V270H840V241"/>
+      <text class="s c" x="640" y="264">v4l2-ctl pipe for RAW10</text>
+    </svg>
+    </div>
+    <figcaption><b>Which file uses which.</b> An arrow means "imports" or "calls". <code>dual_stream.py</code> and <code>camera_API.py</code> can also be run on their own. There are three independent routes to a frame: the UI (top), the colour-only <code>Camera</code> class (middle), and TechNexion's SDK (bottom).</figcaption>
+  </figure>
+
+  <div class="tw"><table>
+    <thead><tr><th>File</th><th>What it does</th></tr></thead>
+    <tbody>
+      <tr><th><code>camera_ui.py</code></th><td>The app. A window with both live views, pickers for size and frame rate, exposure and gain boxes, the measured frame rate, and the Capture button.</td></tr>
+      <tr><th><code>dual_stream.py</code></th><td>The engine behind the UI: start a camera, run its capture thread, make previews, stop it. Run on its own, it streams both cameras for 60 s and saves each one's last frame.</td></tr>
+      <tr><th><code>vc/imx412.py</code></th><td>A <code>Camera</code> class for the colour camera alone, with <code>Mode</code> (size, crop, binning), <code>read()</code>, <code>set()</code>, <code>info()</code>, and <code>save</code>, <code>load</code>, <code>to_rgb8</code>.</td></tr>
+      <tr><th><code>vc/v4l2_capture.py</code></th><td>Vision Components' V4L2 example class: the ioctl and mmap calls from <a href="#streaming">Section 05</a>. One fix of ours: the buffer's memory offset is read from byte 64, not 68.</td></tr>
+      <tr><th><code>vc/vc_controls.py</code></th><td>Vision Components' control IDs and ioctl helpers for their Pi driver, plus our name-to-ID table. Trigger input was removed.</td></tr>
+      <tr><th><code>vc/tegra.py</code></th><td>Jetson helpers used by both routes: <code>IS_JETSON</code>, <code>find_camera</code>, <code>set_format</code>, <code>set_controls</code>, and <code>window</code>, which cuts the wanted rectangle out of a full frame.</td></tr>
+      <tr><th><code>scripts/capture_raw10.py</code></th><td>Command line: grab N colour frames and save the last one.</td></tr>
+      <tr><th><code>camera_API.py</code></th><td>The FL camera through TechNexion's <a class="t" href="#g-sdk">VizionSDK</a>, with RAW10 added. Pi only.</td></tr>
+      <tr><th><code>vizion_cm5.py</code><br><code>scripts/cm5_board_id_shim.c</code></th><td>Workaround so VizionSDK finds the camera on a CM5 (explained below).</td></tr>
+      <tr><th><code>check_raw10.py</code></th><td>Prints the value range of one FL frame and how often each low-2-bit pattern occurs, to confirm real 10-bit data.</td></tr>
+      <tr><th><code>scripts/*_camera_driver.sh</code><br><code>patches/</code>, <code>overlays/</code></th><td>Pi: build and install the TEVS driver with its RAW patch, and the CM5 reset-line overlay.</td></tr>
+      <tr><th><code>scripts/setup_pi_user.sh</code></th><td>Sets up a new user on the shared team Pi.</td></tr>
+      <tr><th><code>jetson/</code></th><td>Jetson: build, install and uninstall scripts, the combined overlay and its checker, two driver patches.</td></tr>
+      <tr><th><code>README.md</code>, <code>documentation.md</code>, <code>docs/</code></th><td>Setup guides for the Pi and the Jetson, the ioctl explainer, and this page.</td></tr>
+      <tr><th><code>pyproject.toml</code>, <code>uv.lock</code></th><td>The Python project definition used by <a class="t" href="#g-uv">uv</a>.</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>What happens when you run camera_ui.py</h3>
+  <ol class="steps">
+    <li>The script builds the window. Each camera gets a title, a slot for the video, Size and Frame rate pickers, Exposure and Gain boxes, and an info line.</li>
+    <li>Setting the starting size fills in the frame-rate list. That selection calls <code>restart(name)</code>, which is what starts each camera.</li>
+    <li><code>start()</code> in <code>dual_stream.py</code> finds the camera by name, sets its format, sets exposure and frame rate with <code>v4l2-ctl</code>, calls <code>open_capture()</code>, and builds the small display pipeline. It returns a dictionary, <code>cam</code>, that describes the running camera.</li>
+    <li>A capture thread runs <code>run(name, cam)</code>: the loop from <a href="#streaming">Section 05</a>. The newest frame is always in <code>cam["last"]</code>.</li>
+    <li>About 15 times a second the thread also makes a small preview image and pushes it to the window.</li>
+    <li>Once a second <code>update_info()</code> shows size, RAW10 and the frame rate counted over that second.</li>
+    <li>Changing Exposure or Gain calls <code>set_exposure</code> or <code>set_gain</code>, which run <code>v4l2-ctl</code> while the camera keeps streaming. Changing Size or Frame rate stops and restarts that camera, which took under a second on the Jetson. <span class="tag m">measured</span></li>
+    <li>Capture takes <code>cam["last"]</code> from each camera and saves it on a background thread, so the live view does not pause.</li>
+    <li>Closing the window or pressing Ctrl+C calls <code>close()</code> for each camera.</li>
+  </ol>
+
+  <figure>
+    <div class="scroll">
+    <svg class="d" viewBox="0 0 940 298" role="img" aria-label="Three threads: the capture thread loops over frames and feeds previews; the main thread draws the window and reacts to clicks; a save thread writes files after Capture.">
+      <rect class="band2" x="10" y="14" width="920" height="82" rx="8"/><text class="cap" x="24" y="34">CAPTURE THREAD · ONE PER CAMERA</text><text class="s e" x="916" y="34">loops until stopped</text>
+      <rect class="band" x="10" y="108" width="920" height="82" rx="8"/><text class="cap" x="24" y="128">MAIN THREAD · THE WINDOW</text>
+      <rect class="band2" x="10" y="202" width="920" height="82" rx="8"/><text class="cap" x="24" y="222">SAVE THREAD · ONE PER CAPTURE</text>
+
+      <rect class="bx" x="24" y="46" width="180" height="38" rx="6"/><text class="c" x="114" y="70">frame ready? select()</text>
+      <rect class="bx" x="232" y="46" width="180" height="38" rx="6"/><text class="c" x="322" y="70">dequeue, copy, requeue</text>
+      <rect class="bx" x="440" y="46" width="180" height="38" rx="6"/><text class="c" x="530" y="70">cam["last"] = frame</text>
+      <rect class="bx" x="648" y="46" width="268" height="38" rx="6"/><text class="c" x="782" y="70">about 15 a second: preview() → appsrc</text>
+      <path class="a" d="M204 65H231"/><path class="a" d="M412 65H439"/><path class="a" d="M620 65H647"/>
+
+      <rect class="bx" x="24" y="140" width="180" height="38" rx="6"/><text class="c" x="114" y="164">each second: fps text</text>
+      <rect class="bx" x="232" y="140" width="180" height="38" rx="6"/><text class="c" x="322" y="164">size or rate picked</text>
+      <rect class="bx" x="440" y="140" width="180" height="38" rx="6"/><text class="c" x="530" y="164">Capture clicked</text>
+      <rect class="bx" x="648" y="140" width="268" height="38" rx="6"/><text class="c" x="782" y="164">draw the live view (gtksink)</text>
+
+      <path class="a" d="M782 84V139"/>
+      <path class="a" d="M530 84V139"/><text class="s" x="538" y="104">newest frame</text>
+      <path class="a" d="M322 140V85"/><text class="s" x="330" y="104">close() + start()</text>
+
+      <rect class="bx" x="440" y="234" width="180" height="38" rx="6"/><text class="c" x="530" y="258">write .raw</text>
+      <rect class="bx" x="648" y="234" width="124" height="38" rx="6"/><text class="c" x="710" y="258">write .png</text>
+      <rect class="bx" x="800" y="234" width="116" height="38" rx="6"/><text class="c" x="858" y="258">show "Saved"</text>
+      <path class="a" d="M530 178V233"/>
+      <path class="a" d="M620 253H647"/><path class="a" d="M772 253H799"/>
+    </svg>
+    </div>
+    <figcaption><b>What runs at the same time in the UI.</b> The capture threads never wait for the window or for a save, which keeps the frame rate steady.</figcaption>
+  </figure>
+
+  <h3>The colour camera on its own</h3>
+  <p><code>vc/imx412.py</code> wraps the same steps in a class for scripts that only need the colour camera:</p>
+<pre><code>from vc import Camera, Mode, save, to_rgb8
+
+with Camera(Mode(4032, 3040), exposure=30000) as cam:   # exposure in µs
+    frame = cam.read()        # (3040, 4032) array of true 10-bit values, 0 to 1023
+    info = cam.info()         # sensor, mode, controls, frame rate, device files, time
+save(frame, "shot", info)     # shot.npy (exact values) + shot.json (how it was taken)</code></pre>
+  <p>Frames are <a class="t" href="#g-numpy">NumPy</a> arrays: grids of numbers that Python can slice and do arithmetic on quickly. On the Pi, <code>Mode</code> can ask the sensor for a smaller rectangle (a <a class="t" href="#g-crop">crop</a>) or for <a class="t" href="#g-binning">binning</a>. On the Jetson the driver only delivers the full frame, so smaller sizes are cut out in Python and binning raises an error.</p>
+  <aside class="more">
+    <p><b>Read</b><a href="https://numpy.org/doc/stable/user/absolute_beginners.html" target="_blank" rel="noopener">NumPy: the absolute basics for beginners</a> · <a href="https://en.wikipedia.org/wiki/Pixel_binning" target="_blank" rel="noopener">Pixel binning</a> <i>(Wikipedia)</i> · <a href="https://github.com/VC-MIPI-modules/vc_mipi_raspi" target="_blank" rel="noopener">Vision Components' Raspberry Pi driver and docs</a> <i>(GitHub)</i></p>
+  </aside>
+
+  <h3>The TechNexion SDK route</h3>
+  <p>An <a class="t" href="#g-sdk">SDK</a> is a library a vendor supplies for its own hardware. TechNexion's is <code>pyvizionsdk</code>. It lists the camera's RAW modes but can only stream UYVY, so <code>camera_API.py</code> keeps the SDK's functions and replaces four of them to stream RAW10 itself.</p>
+  <p>The SDK also refuses to find the camera on a CM5, because it only accepts the Pi 5's board name. <code>vizion_cm5.py</code> works around that with <a class="t" href="#g-ldpreload">LD_PRELOAD</a>: a Linux feature that loads a small library ahead of all others so its functions replace the standard ones. Ours replaces "open a file" so that, when the SDK reads the board name, it gets a file saying "Pi 5". Nothing else is changed. This route has not been ported to the Jetson.</p>
+  <aside class="more">
+    <p><b>Read</b><a href="https://man7.org/linux/man-pages/man8/ld.so.8.html" target="_blank" rel="noopener">ld.so(8) manual page</a> <i>(search it for LD_PRELOAD)</i> · <a href="https://github.com/TechNexion-Vision/tn-rpi-camera-driver" target="_blank" rel="noopener">TechNexion's Raspberry Pi camera driver</a> <i>(GitHub)</i></p>
+  </aside>
+</section>
+
+<!-- ============================================================ 8 -->
+<section id="preview">
+  <p class="num">Section 08 · Window and files</p>
+  <h2>The live view</h2>
+  <p>A raw frame looks wrong on a screen: far too big, dark, and for the colour camera, green. The live view applies a few cheap corrections to a shrunken copy. <strong>Saved files do not get any of this.</strong> They hold the sensor's values unchanged.</p>
+  <figure>
+    <div class="scroll">
+    <svg class="d" viewBox="0 0 960 112" role="img" aria-label="The colour preview: full frame, sample every third block to 672 by 507, white balance, stretch, gamma, then 8-bit colour to the window.">
+      <rect class="cob" x="10" y="16" width="140" height="76" rx="6"/><text class="b c" x="80" y="40">full frame</text><text class="s c" x="80" y="58">4032 × 3040</text><text class="s c" x="80" y="74">16-bit words</text>
+      <rect class="bx" x="170" y="16" width="140" height="76" rx="6"/><text class="b c" x="240" y="40">sample</text><text class="s c" x="240" y="58">every 3rd block</text><text class="s c" x="240" y="74">672 × 507 in colour</text>
+      <rect class="bx" x="330" y="16" width="140" height="76" rx="6"/><text class="b c" x="400" y="40">white balance</text><text class="s c" x="400" y="58">scale R, G and B to</text><text class="s c" x="400" y="74">equal averages</text>
+      <rect class="bx" x="490" y="16" width="140" height="76" rx="6"/><text class="b c" x="560" y="40">stretch</text><text class="s c" x="560" y="58">the 99.5th percentile</text><text class="s c" x="560" y="74">becomes white</text>
+      <rect class="bx" x="650" y="16" width="140" height="76" rx="6"/><text class="b c" x="720" y="40">gamma</text><text class="s c" x="720" y="58">value to the power</text><text class="s c" x="720" y="74">1 / 2.2</text>
+      <rect class="bx" x="810" y="16" width="140" height="76" rx="6"/><text class="b c" x="880" y="40">to the window</text><text class="s c" x="880" y="58">8-bit colour</text><text class="s c" x="880" y="74">through appsrc</text>
+      <path class="a" d="M150 54H169"/><path class="a" d="M310 54H329"/><path class="a" d="M470 54H489"/><path class="a" d="M630 54H649"/><path class="a" d="M790 54H809"/>
+    </svg>
+    </div>
+    <figcaption><b>What <code>preview()</code> and <code>stretch()</code> do to a colour frame.</b> The FL view skips white balance and stays 16-bit grey. At 1920 × 1080 it is not shrunk.</figcaption>
+  </figure>
+  <ul>
+    <li><strong>Sample.</strong> The preview is kept to about 1280 pixels wide. For the full colour frame that means taking one 2 × 2 block in every three, in each direction.</li>
+    <li><strong><a class="t" href="#g-wb">White balance</a>.</strong> The sensor's green pixels respond more strongly than red and blue. The "grey world" method scales the three colours until their averages match.</li>
+    <li><strong>Stretch.</strong> The brightest pixels (the 99.5th percentile) are mapped to white, so a dim scene still fills the display's range.</li>
+    <li><strong><a class="t" href="#g-gamma">Gamma</a>.</strong> Raising values to the power 1 / 2.2 brightens dark tones the way screens expect.</li>
+  </ul>
+  <aside class="more">
+    <p><b>Read</b><a href="https://en.wikipedia.org/wiki/Gamma_correction" target="_blank" rel="noopener">Gamma correction</a> · <a href="https://en.wikipedia.org/wiki/Color_balance" target="_blank" rel="noopener">Colour balance</a> <i>(Wikipedia; includes the grey-world method)</i></p>
+    <p><b>Watch</b><a class="v" href="https://www.youtube.com/watch?v=LKnqECcg6Gw" target="_blank" rel="noopener">Computer Color is Broken</a> <i>minutephysics (why gamma exists)</i></p>
+  </aside>
+
+  <h3>GStreamer and GTK</h3>
+  <p><a class="t" href="#g-gst">GStreamer</a> is a library that builds video pipelines out of small parts joined with <code>!</code>. Ours has three parts per camera:</p>
+<pre><code>appsrc  !  videoconvert  !  gtksink</code></pre>
+  <ul>
+    <li><code>appsrc</code> is a part that our own code feeds. <code>run()</code> pushes each preview image into it.</li>
+    <li><code>videoconvert</code> changes the pixel layout into whatever the display part wants.</li>
+    <li><code>gtksink</code> draws the video inside the window. <code>dual_stream.py</code> on its own uses <code>autovideosink</code>, which opens a window by itself.</li>
+  </ul>
+  <p><a class="t" href="#g-gtk">GTK</a> is the toolkit that draws the window, buttons and boxes. The constant <code>DISPLAY_FPS = 15</code> in <code>dual_stream.py</code> sets how often a preview is made. It does not limit capture: every frame still passes through the capture thread.</p>
+  <aside class="more">
+    <p><b>Read</b><a href="https://gstreamer.freedesktop.org/documentation/application-development/introduction/basics.html" target="_blank" rel="noopener">GStreamer foundations</a> <i>(elements, pads, pipelines)</i> · <a href="https://gstreamer.freedesktop.org/documentation/tutorials/basic/concepts.html" target="_blank" rel="noopener">GStreamer basic tutorial: concepts</a> · <a href="https://gstreamer.freedesktop.org/documentation/app/appsrc.html" target="_blank" rel="noopener">appsrc reference</a> · <a href="https://pygobject.gnome.org/" target="_blank" rel="noopener">PyGObject</a> <i>(the Python bindings we import as <code>gi</code>)</i> · <a href="https://docs.gtk.org/gtk3/" target="_blank" rel="noopener">GTK 3 reference</a></p>
+    <p><b>Watch</b><a class="v" href="https://www.youtube.com/watch?v=tv1Mm7q_GlE" target="_blank" rel="noopener">GStreamer 101: Introduction &amp; Sample Pipelines for Beginners</a> <i>PyramidTech</i></p>
+  </aside>
+</section>
+
+<!-- ============================================================ 9 -->
+<section id="files">
+  <p class="num">Section 09</p>
+  <h2>What gets saved</h2>
+  <div class="tw"><table>
+    <thead><tr><th>Made by</th><th>Files</th><th>Contents</th></tr></thead>
+    <tbody>
+      <tr><th rowspan="2">Capture button</th><td><code>~/Desktop/PATH-captures/&lt;sensor&gt;/&lt;date_time&gt;/</code><br><code>&lt;size&gt;_&lt;fps&gt;fps_&lt;exposure&gt;us_&lt;gain&gt;.raw</code></td><td>The 10-bit values, 0 to 1023, as 16-bit little-endian numbers, row by row. No header.</td></tr>
+      <tr><td>Same name, <code>.png</code></td><td>16-bit PNG for viewing. Values are × 64 so it is not black in a viewer. Colour is demosaiced; no white balance.</td></tr>
+      <tr><th rowspan="2"><code>dual_stream.py</code><br>run on its own</th><td><code>fl_raw10.npy</code>, <code>color_raw10.npy</code></td><td><a class="t" href="#g-numpy">NumPy</a> arrays of the 10-bit values of each camera's last frame</td></tr>
+      <tr><td><code>fl.png</code>, <code>color.png</code></td><td>8-bit previews (the top 8 of the 10 bits)</td></tr>
+      <tr><th><code>scripts/capture_raw10.py</code></th><td><code>&lt;out&gt;.npy</code>, <code>&lt;out&gt;.json</code>, and <code>&lt;out&gt;.png</code> with <code>--png</code></td><td>Exact values, plus a text record of sensor, mode, controls, frame rate, device files, time, and min, max, mean</td></tr>
+      <tr><th><code>camera_API.py</code><br>run on its own</th><td><code>raw10.pgm</code></td><td>16-bit grey image with a maximum of 1023</td></tr>
+    </tbody>
+  </table></div>
+  <p>A real example from the Jetson: <code>IMX412C/2026-11-10_16-45-37/4032x3040_maxfps_30000us_1x.raw</code>. The file name records the size, the frame-rate setting, the exposure and the gain. To load a <code>.raw</code> file you supply the size yourself:</p>
+<pre><code>import numpy as np
+frame = np.fromfile("4032x3040_maxfps_30000us_1x.raw", np.uint16).reshape(3040, 4032)   # rows, then columns</code></pre>
+  <aside class="more">
+    <p><b>Read</b><a href="https://numpy.org/doc/stable/reference/generated/numpy.fromfile.html" target="_blank" rel="noopener">numpy.fromfile</a> <i>(reading a headerless file like our .raw)</i></p>
+  </aside>
+</section>
+
+<!-- ============================================================ 10 -->
+<section id="speed">
+  <p class="num">Section 10</p>
+  <h2>Frame rate: what limits it</h2>
+  <p>A frame passes through several stages, and the slowest one sets the rate. When the frame rate is lower than expected, check the stages in this order.</p>
+  <div class="tw"><table>
+    <thead><tr><th>Limit</th><th>Rule</th><th>Colour camera on the Jetson</th></tr></thead>
+    <tbody>
+      <tr><th>Lanes</th><td>More lanes carry more frames (<a href="#cable">Section 03</a>)</td><td>20.03 fps on 2 lanes; 40.06 on 4</td></tr>
+      <tr><th>Exposure</th><td>A frame cannot be shorter than its exposure</td><td>30 ms allows at most 33 fps, so it does not matter at 20</td></tr>
+      <tr><th>Frame height</th><td>Fewer rows take less time to read out</td><td>Our Jetson driver build only offers the full frame</td></tr>
+      <tr><th>Getting frames to Python</th><td>Pipe or direct read (<a href="#pipe">Section 06</a>)</td><td>8.2 fps through the pipe; 19.8 direct</td></tr>
+      <tr><th>The live view</th><td>Only 15 previews a second are made</td><td>Does not slow capture</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>Measured on the Jetson, both cameras together</h3>
+  <div class="tw"><table>
+    <thead><tr><th>Camera</th><th>Size</th><th>Limit</th><th>Measured</th></tr></thead>
+    <tbody>
+      <tr><td class="co">Colour</td><td class="n">4032 × 3040</td><td>20.03 fps (2 lanes)</td><td class="n">20.4 fps</td></tr>
+      <tr><td class="fl">FL</td><td class="n">1920 × 1080</td><td>60 fps (vendor)</td><td class="n">58.5 fps; 60.0 alone</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>FL camera: vendor figures against ours</h3>
+  <p>TechNexion publishes maximum frame rates for the camera's processed YUY2 output. We run it in RAW10, so the limits may differ.</p>
+  <div class="tw"><table>
+    <thead><tr><th>Size</th><th>Vendor maximum (YUY2)</th><th>RAW10 on the Jetson</th></tr></thead>
+    <tbody>
+      <tr><td class="n">3840 × 2160</td><td class="n">15 fps</td><td>Not tested</td></tr>
+      <tr><td class="n">2560 × 1440</td><td class="n">30 fps</td><td>Not tested</td></tr>
+      <tr><td class="n">1920 × 1080</td><td class="n">60 fps</td><td>60.0 fps with exposure up to 16 ms; 48.9 fps at 20 ms <span class="tag m">measured</span></td></tr>
+      <tr><td class="n">1280 × 720</td><td class="n">60 fps</td><td>Kernel log shows discarded frames (see <a href="#open">Open problems</a>)</td></tr>
+      <tr><td class="n">640 × 480</td><td class="n">60 fps</td><td>Not tested</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>Colour camera: frame rate by height</h3>
+  <p>There is no published table of size against frame rate for the IMX412C module. The real reference is the driver source (<code>vc_init_ctrl_imx412</code> in Vision Components' <code>vc_mipi_modules.c</code>). It sets the rate from the number of rows only; width has no effect. On 2 lanes: fps = 20.03 × 3092 ÷ (3092 − (3040 − height)). On 4 lanes it is double.</p>
+  <figure>
+    <div class="scroll">
+    <svg class="d" viewBox="0 0 860 244" role="img" aria-label="Calculated frame rates by frame height: 3040 rows give 20.0 and 40.1 fps on 2 and 4 lanes; 2160 rows 28.0 and 56.0; 1520 rows 39.4 and 78.8; 1080 rows 54.7 and 109.4.">
+      <rect class="fmu" x="610" y="20" width="12" height="12"/><text class="s" x="628" y="31">2 lanes</text>
+      <rect class="fco" x="700" y="20" width="12" height="12"/><text class="s" x="718" y="31">4 lanes</text>
+      <text class="e" x="160" y="47">3040 rows (full)</text>
+      <rect class="fmu" x="170" y="28" width="109" height="14"/><text class="s" x="285" y="40">20.0</text>
+      <rect class="fco" x="170" y="44" width="219" height="14"/><text class="s" x="395" y="56">40.1</text>
+      <text class="e" x="160" y="95">2160 rows</text>
+      <rect class="fmu" x="170" y="76" width="153" height="14"/><text class="s" x="329" y="88">28.0</text>
+      <rect class="fco" x="170" y="92" width="305" height="14"/><text class="s" x="481" y="104">56.0</text>
+      <text class="e" x="160" y="143">1520 rows</text>
+      <rect class="fmu" x="170" y="124" width="215" height="14"/><text class="s" x="391" y="136">39.4</text>
+      <rect class="fco" x="170" y="140" width="430" height="14"/><text class="s" x="606" y="152">78.8</text>
+      <text class="e" x="160" y="191">1080 rows</text>
+      <rect class="fmu" x="170" y="172" width="298" height="14"/><text class="s" x="474" y="184">54.7</text>
+      <rect class="fco" x="170" y="188" width="597" height="14"/><text class="s" x="773" y="200">109.4</text>
+      <path class="lmu" d="M170 214H770M170 214v5M279 214v5M388 214v5M497 214v5M606 214v5M715 214v5"/>
+      <text class="s c" x="170" y="234">0</text><text class="s c" x="279" y="234">20</text><text class="s c" x="388" y="234">40</text><text class="s c" x="497" y="234">60</text><text class="s c" x="606" y="234">80</text><text class="s c" x="715" y="234">100</text>
+      <text class="s" x="740" y="234">fps</text>
+    </svg>
+    </div>
+    <figcaption><b>IMX412C maximum frame rate by frame height.</b> <span class="tag c">calculated</span> from the driver's formula, not measured. On the Jetson today only the first row at 2 lanes is reachable. The vendor's hardware manual says cropping gives "no speed increase" and that the module has no binning; the driver source contradicts both, and neither has been tested.</figcaption>
+  </figure>
+  <aside class="more">
+    <p><b>Read</b><a href="https://github.com/VC-MIPI-modules/vc_mipi_nvidia" target="_blank" rel="noopener">Vision Components' Jetson driver source</a> <i>(GitHub; <code>src/driver/vc_mipi_modules.c</code>)</i> · <a href="https://www.mipi-modules.com/fileadmin/external/documentation/hardware/VC_MIPI_Camera_Module/index_mouser.html" target="_blank" rel="noopener">VC MIPI hardware manual</a> · <a href="https://www.technexion.com/products/embedded-vision/mipi-csi2/tevs/tevs-ar0822/" target="_blank" rel="noopener">TechNexion TEVS-AR0822 page</a> <i>(the frame-rate table)</i></p>
+  </aside>
+</section>
+
+<!-- ============================================================ 11 -->
+<section id="drivers">
+  <p class="num">Section 11</p>
+  <h2>Drivers and boot setup</h2>
+  <p>Neither camera's driver comes with the operating system. Each computer therefore needs two things done once, and again after every kernel update: build and install the driver modules, and add the cameras to the device tree so the kernel knows where they are.</p>
+
+  <h3>Raspberry Pi</h3>
+  <ul>
+    <li><strong>FL camera.</strong> <code>scripts/build_camera_driver.sh</code> downloads TechNexion's driver at a fixed revision, applies <code>patches/tevs-raw.patch</code> (which adds RAW output; UYVY stays the default), builds <code>tevs.ko</code> and compiles the overlays. <code>sudo bash scripts/install_camera_driver.sh</code> copies them into place and reloads the driver. Then <code>/boot/firmware/config.txt</code> needs <code>camera_auto_detect=0</code> and <code>dtoverlay=tevs-rpi22,cam0</code>.</li>
+    <li><strong>Colour camera.</strong> Vision Components ships a package that installs through <a class="t" href="#g-dkms">DKMS</a>, so it rebuilds itself on most kernel updates. Its config file must name the port, 4 lanes and Sony as the sensor maker. <code>docs/vc-imx412-setup.md</code> has the exact lines.</li>
+    <li><strong>CM5 IO Board, CAM/DISP 1.</strong> That connector holds the camera's reset line high, so a TEVS plugged in there never starts. The fix is one wire from <a class="t" href="#g-gpio">GPIO</a> 4 through a 330 Ω resistor, plus the <code>tevs-cam1-reset</code> overlay. The README has the details.</li>
+  </ul>
+  <aside class="more">
+    <p><b>Read</b><a href="https://www.raspberrypi.com/documentation/computers/camera_software.html" target="_blank" rel="noopener">Raspberry Pi camera software</a> <i>(official docs)</i> · <a href="https://github.com/TechNexion-Vision/tn-rpi-camera-driver" target="_blank" rel="noopener">TechNexion Pi driver</a> · <a href="https://github.com/VC-MIPI-modules/vc_mipi_raspi" target="_blank" rel="noopener">Vision Components Pi driver</a> <i>(GitHub)</i> · <a href="https://en.wikipedia.org/wiki/Dynamic_Kernel_Module_Support" target="_blank" rel="noopener">DKMS</a> <i>(Wikipedia)</i> · <a href="https://github.com/dell/dkms" target="_blank" rel="noopener">DKMS project</a></p>
+  </aside>
+
+  <h3>Jetson Orin Nano</h3>
+  <figure>
+    <div class="scroll">
+    <svg class="d" viewBox="0 0 950 246" role="img" aria-label="build.sh fetches vendor sources, runs an ABI check, builds the two drivers and the overlay. install.sh copies four modules and the overlay and adds a boot entry, then you reboot.">
+      <text class="mb" x="20" y="24">bash jetson/build.sh</text><text class="s" x="190" y="24">no sudo; about 20 s; output in .jetson-build/out</text>
+      <rect class="bx" x="20" y="38" width="166" height="66" rx="6"/><text class="b c" x="103" y="59">fetch sources</text><text class="s c" x="103" y="77">TechNexion and VC,</text><text class="s c" x="103" y="92">fixed revisions</text>
+      <rect class="acb" x="206" y="38" width="166" height="66" rx="6"/><text class="b c" x="289" y="59">ABI check</text><text class="s c" x="289" y="77">our build must match</text><text class="s c" x="289" y="92">TechNexion's binary</text>
+      <rect class="flb" x="392" y="38" width="166" height="66" rx="6"/><text class="b c" x="475" y="59">build tevs.ko</text><text class="s c" x="475" y="77">with the RAW10</text><text class="s c" x="475" y="92">patch</text>
+      <rect class="cob" x="578" y="38" width="166" height="66" rx="6"/><text class="b c" x="661" y="59">build vc_mipi modules</text><text class="s c" x="661" y="77">against NVIDIA's</text><text class="s c" x="661" y="92">stock camera module</text>
+      <rect class="bx" x="764" y="38" width="166" height="66" rx="6"/><text class="b c" x="847" y="59">build the overlay</text><text class="s c" x="847" y="77">check_overlay.py compares</text><text class="s c" x="847" y="92">it with the vendors' files</text>
+      <path class="a" d="M186 71H205"/><path class="a" d="M372 71H391"/><path class="a" d="M558 71H577"/><path class="a" d="M744 71H763"/>
+      <path class="a" d="M847 104V130H120V161"/>
+
+      <text class="mb" x="140" y="152">sudo bash jetson/install.sh</text>
+      <rect class="bx" x="20" y="162" width="214" height="66" rx="6"/><text class="b c" x="127" y="183">4 kernel modules</text><text class="s c" x="127" y="201">copied under</text><text class="m c" x="127" y="216">/lib/modules/&lt;kernel&gt;/updates</text>
+      <rect class="bx" x="252" y="162" width="214" height="66" rx="6"/><text class="b c" x="359" y="183">overlay</text><text class="s c" x="359" y="201">copied to /boot as</text><text class="m c" x="359" y="216">…-path-imaging.dtbo</text>
+      <rect class="bx" x="484" y="162" width="214" height="66" rx="6"/><text class="b c" x="591" y="183">boot entry</text><text class="s c" x="591" y="201">new default "path-cameras";</text><text class="s c" x="591" y="216">"primary" is left alone</text>
+      <rect class="bx" x="716" y="162" width="214" height="66" rx="6"/><text class="b c" x="823" y="183">reboot</text><text class="s c" x="823" y="201">undo at any time with</text><text class="m c" x="823" y="216">sudo bash jetson/uninstall.sh</text>
+      <path class="a" d="M234 195H251"/><path class="a" d="M466 195H483"/><path class="a" d="M698 195H715"/>
+    </svg>
+    </div>
+    <figcaption><b>The two Jetson scripts.</b> If the new boot entry fails, choose "primary" in the boot menu and run the uninstall script, which restores the boot file byte for byte.</figcaption>
+  </figure>
+  <ul>
+    <li><strong>The ABI check.</strong> An <a class="t" href="#g-abi">ABI</a> is the exact memory layout that two separately compiled pieces of code must agree on. Our modules share data structures with NVIDIA's camera module. NVIDIA's header package lacks one generated file that affects that layout, so the repo carries a stand-in (<code>jetson/include/nvidia/conftest.h</code>). A wrong stand-in would still compile, and then corrupt kernel memory. The script proves it by building TechNexion's unmodified driver and requiring the result to match TechNexion's own binary instruction for instruction.</li>
+    <li><strong>TEVS RAW10.</strong> TechNexion's Jetson driver only outputs UYVY. <code>jetson/patches/tevs-raw10.patch</code> makes a device-tree mode declared as 10-bit Bayer select the camera's RAW10 output.</li>
+    <li><strong>The VC driver, cut down.</strong> Vision Components expects NVIDIA's camera module to be patched as well. We do not patch it. <code>jetson/patches/vc-mipi-stock-tegracam.patch</code> builds the driver against the unpatched module, which leaves out trigger mode, I/O mode, black level, binning and sensor cropping. Exposure, gain and frame rate work.</li>
+    <li><strong>One overlay for both cameras.</strong> <code>jetson/overlay/path-cameras.dts</code> joins the two vendors' overlays, one camera each. A wrong overlay only shows up as a camera that does not start, so <code>check_overlay.py</code> compares every property with the vendors' files before anything is installed.</li>
+    <li><strong>The boot entry.</strong> <code>/boot/extlinux/extlinux.conf</code> is the Jetson's boot menu. <code>extlinux.py</code> copies the existing "primary" entry into a new one that also loads our overlay, and makes it the default.</li>
+  </ul>
+<pre><code>bash jetson/build.sh
+sudo bash jetson/install.sh        # add --imx412-on cam1 after swapping the cables
+sudo reboot
+journalctl -k -b | grep -iE "vc_mipi|tevs"    # both drivers should report a successful probe</code></pre>
+  <aside class="more">
+    <p><b>Read</b><a href="https://docs.nvidia.com/jetson/archives/r36.4/DeveloperGuide/SD/CameraDevelopment/SensorSoftwareDriverProgramming.html" target="_blank" rel="noopener">NVIDIA: Sensor Software Driver Programming</a> <i>(written for an older Jetson release; the device-tree properties in our overlay are explained there)</i> · <a href="https://docs.nvidia.com/jetson/archives/r36.4/DeveloperGuide/SD/CameraDevelopment.html" target="_blank" rel="noopener">NVIDIA: Camera Development</a> · <a href="https://github.com/TechNexion-Vision/tn-jetson-camera-driver" target="_blank" rel="noopener">TechNexion Jetson driver</a> · <a href="https://github.com/VC-MIPI-modules/vc_mipi_nvidia" target="_blank" rel="noopener">Vision Components Jetson driver</a> <i>(GitHub)</i> · <a href="https://en.wikipedia.org/wiki/Application_binary_interface" target="_blank" rel="noopener">Application binary interface</a> <i>(Wikipedia)</i></p>
+  </aside>
+</section>
+
+<!-- ============================================================ 12 -->
+<section id="run">
+  <p class="num">Section 12</p>
+  <h2>Run it</h2>
+  <h3>On the Jetson</h3>
+<pre><code>cd ~/src/PATH-Imaging
+.venv/bin/python camera_ui.py                                   # both cameras live; Capture saves to ~/Desktop/PATH-captures
+.venv/bin/python dual_stream.py                                 # both cameras for 60 s, then saves each one's last frame
+.venv/bin/python scripts/capture_raw10.py --count 5 --png       # colour camera only</code></pre>
+  <div class="box warn"><p><strong>Do not use <code>uv run</code> or <code>uv sync</code> on the Jetson.</strong> The project file asks for Python 3.13, the Jetson has 3.12, and the virtual environment there was made by hand. <code>uv run</code> deletes it and fails to build a new one. If that happens, <code>docs/jetson-orin-nano-setup.md</code> has the two commands that rebuild it.</p></div>
+  <h3>On a Raspberry Pi</h3>
+<pre><code>uv run python camera_ui.py
+uv run python scripts/capture_raw10.py --png
+uv run python camera_API.py                  # FL camera through VizionSDK: 60 s live, saves raw10.pgm</code></pre>
+  <p>Your user must be in the <code>video</code> and <code>i2c</code> groups. Quit with Ctrl+C, not Ctrl+Z: a paused run keeps the camera busy.</p>
+  <aside class="more">
+    <p><b>Read</b><a href="https://docs.astral.sh/uv/" target="_blank" rel="noopener">uv documentation</a> <i>(the Python project tool; virtual environments are explained there)</i></p>
+  </aside>
+</section>
+
+<!-- ============================================================ 13 -->
+<section id="open">
+  <p class="num">Section 13</p>
+  <h2>Open problems</h2>
+  <p>As of 10 November 2026.</p>
+  <div class="tw"><table>
+    <thead><tr><th>Problem</th><th>What is known</th></tr></thead>
+    <tbody>
+      <tr><th>Kernel faults while the colour camera streams (Jetson)</th><td>The kernel log fills with memory-fault messages, about one per frame. Frames look intact. It never happens with the FL camera alone. The suspect is the sensor's two lines of embedded data; declaring zero lines stops the faults only because every frame is then discarded.</td></tr>
+      <tr><th>FL camera stuck in automatic exposure (Jetson)</th><td>The camera can run in auto exposure while its <code>exposure_mode</code> control reads Manual. It then delivers 30.39 fps and ignores <code>exposure</code>. Setting <code>exposure_mode</code> to 1 and back to 0 cured it. What puts it in that state is not known.</td></tr>
+      <tr><th>FL camera at 1280 × 720 (Jetson)</th><td>The kernel logs <code>corr_err: discarding frame</code>, also with plain <code>v4l2-ctl</code>. Not retested since the exposure cure above.</td></tr>
+      <tr><th>Pi code paths not rerun</th><td>Each of <code>vc/imx412.py</code>, <code>dual_stream.py</code> and <code>camera_ui.py</code> gained a Jetson branch, and the pipe was replaced on both paths. None of it has been run on a Pi since.</td></tr>
+      <tr><th>Colour camera frame rate on the Pi</th><td>Vision Components' Pi driver delivered 22.07 fps when asked for 30, so the code asks for 1.35 times the wanted rate.</td></tr>
+      <tr><th>Colour camera limited to 20 fps (Jetson)</th><td>It is on the 2-lane port. Swapping ports is supported by the install script but untested.</td></tr>
+      <tr><th>Binning, sensor crop, black level (Jetson)</th><td>Not available in our driver build. Measure the black level with the lens capped; do not assume the Pi's value of 64.</td></tr>
+      <tr><th>Trigger input removed</th><td>Removed from our code because the vendor manual lists none for the IMX412C. The driver source does contain a slave-sync mode.</td></tr>
+      <tr><th><code>camera_API.py</code> not ported</th><td>The VizionSDK route runs on the Pi only.</td></tr>
+      <tr><th>Nothing committed</th><td>The Jetson port (<code>jetson/</code>, <code>vc/tegra.py</code>, the Jetson doc) and the direct-read change exist only in the working tree on the Jetson.</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- ============================================================ 14 -->
+<section id="glossary">
+  <p class="num">Section 14</p>
+  <h2>Glossary</h2>
+  <dl class="gloss">
+    <div id="g-abi"><dt>ABI</dt><dd>Application binary interface. The exact memory layout two separately compiled pieces of code must agree on.</dd></div>
+    <div id="g-appsrc"><dt>appsrc</dt><dd>The GStreamer part that a program feeds with its own images.</dd></div>
+    <div id="g-bayer"><dt>Bayer pattern</dt><dd>The repeating 2 × 2 grid of red, green and blue filters over a colour sensor's pixels.</dd></div>
+    <div id="g-binning"><dt>Binning</dt><dd>Combining neighbouring pixels on the sensor into one, giving a smaller and faster frame.</dd></div>
+    <div id="g-bitdepth"><dt>Bit depth</dt><dd>How many bits each pixel value has. Ten bits count from 0 to 1023.</dd></div>
+    <div id="g-black"><dt>Black level</dt><dd>The value a pixel reports with no light at all. It is not zero.</dd></div>
+    <div id="g-buffer"><dt>Buffer</dt><dd>A block of memory that holds one frame.</dd></div>
+    <div id="g-control"><dt>Control</dt><dd>A named number on a camera that a program can read or change, such as <code>exposure</code>.</dd></div>
+    <div id="g-crop"><dt>Crop, ROI</dt><dd>Using only a rectangle of the sensor. ROI means region of interest.</dd></div>
+    <div id="g-csi2"><dt>CSI-2 (MIPI CSI-2)</dt><dd>The standard link that carries pixels from a camera to a small computer.</dd></div>
+    <div id="g-db"><dt>Decibel (dB, mdB)</dt><dd>A logarithmic unit for gain. 6 dB is about 2×, 20 dB is 10×. One mdB is a thousandth of a dB.</dd></div>
+    <div id="g-demosaic"><dt>Demosaic</dt><dd>Working out full colour for every pixel from a Bayer frame.</dd></div>
+    <div id="g-devfile"><dt>Device file</dt><dd>An entry under <code>/dev</code> through which programs reach a device.</dd></div>
+    <div id="g-dt"><dt>Device tree, overlay</dt><dd>A description of the board's hardware that the kernel reads at boot. An overlay is an add-on to it. Source files end in <code>.dts</code>, compiled ones in <code>.dtbo</code>.</dd></div>
+    <div id="g-dkms"><dt>DKMS</dt><dd>A system that rebuilds a driver automatically when the kernel is updated.</dd></div>
+    <div id="g-dmesg"><dt>dmesg, journalctl -k</dt><dd>Commands that print the kernel's log, where drivers report what they found.</dd></div>
+    <div id="g-driver"><dt>Driver</dt><dd>Kernel code that knows how to run one kind of device.</dd></div>
+    <div id="g-exposure"><dt>Exposure</dt><dd>How long the pixels collect light for one frame. Here it is given in microseconds.</dd></div>
+    <div id="g-extlinux"><dt>extlinux.conf</dt><dd>The Jetson's boot menu file. Each entry names a kernel, a device tree and its overlays.</dd></div>
+    <div id="g-fd"><dt>File descriptor</dt><dd>The small number the kernel gives a program to stand for a file it has opened.</dd></div>
+    <div id="g-fl"><dt>FL</dt><dd>Fluorescence. Our name for the mono TEVS camera.</dd></div>
+    <div id="g-fourcc"><dt>FourCC</dt><dd>A four-letter code naming a pixel format, such as <code>RG10</code>.</dd></div>
+    <div id="g-fps"><dt>fps, mHz</dt><dd>Frames per second. One mHz is a thousandth of a hertz, so 20000 mHz is 20 fps.</dd></div>
+    <div id="g-gain"><dt>Gain</dt><dd>Amplification of the pixel signal. It brightens the image and its noise alike.</dd></div>
+    <div id="g-gamma"><dt>Gamma</dt><dd>A curve that brightens dark tones for display. The preview uses a power of 1 / 2.2.</dd></div>
+    <div id="g-gpio"><dt>GPIO</dt><dd>A general-purpose pin the computer can switch high or low. Used here for a camera's reset line.</dd></div>
+    <div id="g-gst"><dt>GStreamer</dt><dd>A library for building video pipelines from small parts joined with <code>!</code>.</dd></div>
+    <div id="g-gtk"><dt>GTK</dt><dd>The toolkit that draws the window, buttons and input boxes.</dd></div>
+    <div id="g-i2c"><dt>I2C</dt><dd>A slow two-wire bus for settings. Each chip on it has an address such as <code>0x1a</code>.</dd></div>
+    <div id="g-ioctl"><dt>ioctl</dt><dd>The system call that sends a command and a block of data to a device.</dd></div>
+    <div id="g-isp"><dt>ISP</dt><dd>Image signal processor. Turns raw sensor values into a finished picture.</dd></div>
+    <div id="g-jetson"><dt>Jetson, L4T, JetPack</dt><dd>NVIDIA's small computer. L4T (Linux for Tegra) is its Linux; JetPack is the software bundle around it.</dd></div>
+    <div id="g-kernel"><dt>Kernel</dt><dd>The core of the operating system and the only software that talks to hardware.</dd></div>
+    <div id="g-module"><dt>Kernel module</dt><dd>A <code>.ko</code> file of kernel code that can be loaded separately, such as a driver.</dd></div>
+    <div id="g-lane"><dt>Lane</dt><dd>One pair of wires in a CSI-2 link. More lanes carry more data per second.</dd></div>
+    <div id="g-ldpreload"><dt>LD_PRELOAD</dt><dd>A Linux setting that loads a chosen library first, so its functions replace the standard ones.</dd></div>
+    <div id="g-media"><dt>Media device, media-ctl</dt><dd><code>/dev/mediaN</code> holds the map of how a camera's stages are linked. <code>media-ctl</code> shows and edits it.</dd></div>
+    <div id="g-mmap"><dt>mmap</dt><dd>Memory mapping. Makes a device's memory appear inside a program without copying.</dd></div>
+    <div id="g-numpy"><dt>NumPy, .npy</dt><dd>Python's library for arrays of numbers. A <code>.npy</code> file stores one array exactly.</dd></div>
+    <div id="g-pipe"><dt>Pipe</dt><dd>A one-way channel from one process's output to another's input, with a 65,536-byte buffer in the kernel.</dd></div>
+    <div id="g-probe"><dt>Probe</dt><dd>A driver's start-up check that its device is present and answering.</dd></div>
+    <div id="g-process"><dt>Process</dt><dd>A running copy of a program, with its own private memory.</dd></div>
+    <div id="g-raw10"><dt>RAW10</dt><dd>Unprocessed sensor values with 10 bits per pixel.</dd></div>
+    <div id="g-sdk"><dt>SDK, VizionSDK</dt><dd>Software development kit: a vendor's library for its hardware. VizionSDK is TechNexion's.</dd></div>
+    <div id="g-select"><dt>select()</dt><dd>A call that waits, up to a time limit, until a file has something ready.</dd></div>
+    <div id="g-sensor"><dt>Sensor</dt><dd>The chip with the grid of light-detecting pixels.</dd></div>
+    <div id="g-stdout"><dt>stdout</dt><dd>Standard output. The stream a process's printed output goes to.</dd></div>
+    <div id="g-subdev"><dt>Sub-device</dt><dd><code>/dev/v4l-subdevN</code>. One stage of a camera, usually the sensor, with its controls.</dd></div>
+    <div id="g-subprocess"><dt>subprocess</dt><dd>Python's module for starting other programs.</dd></div>
+    <div id="g-thread"><dt>Thread</dt><dd>A second line of execution inside one process, sharing its memory.</dd></div>
+    <div id="g-uv"><dt>uv, virtual environment</dt><dd>uv is the Python project tool used here. A virtual environment (<code>.venv</code>) is a private folder of Python packages for one project.</dd></div>
+    <div id="g-v4l2"><dt>V4L2</dt><dd>Video4Linux2. The kernel's standard interface for cameras.</dd></div>
+    <div id="g-v4l2ctl"><dt>v4l2-ctl</dt><dd>A command-line program that speaks V4L2: list cameras, change controls, grab frames.</dd></div>
+    <div id="g-wb"><dt>White balance</dt><dd>Scaling red, green and blue so that grey things look grey.</dd></div>
+    <div id="g-yuy2"><dt>YUY2, UYVY</dt><dd>Processed video formats that store brightness and colour separately. What an ISP usually outputs.</dd></div>
+  </dl>
+</section>
+
+<footer>
+  <p>Written from the repository and from measurements on the Jetson on 10 November 2026. Outside links were checked for availability the same day; videos are listed by their published title and channel.</p>
+</footer>
+
+</main>
+</div>
+</body>
+</html>

@@ -13,6 +13,7 @@ Run: uv run python dual_stream.py
 """
 from pathlib import Path
 import re
+import select
 import subprocess
 import threading
 import time
@@ -23,16 +24,67 @@ import gi
 gi.require_version("Gst", "1.0")
 from gi.repository import Gst
 
+from vc import tegra, v4l2_capture
+
 RUN_SECONDS = 60
 DISPLAY_FPS = 15  # Windows refresh this often; every frame is still captured
 CAMERAS = {  # name: entity pattern, media-bus format, V4L2 format, width, height, frame rate (None = sensor default)
     "fl": (r"tevs \S+", "SGRBG10_1X10", "GR16", 1920, 1080, 60),  # Or 2560, 1440, 30
     "color": (r"vc_mipi_camera \S+", "SRGGB10_1X10", "RG16", 4032, 3040, None),  # Full sensor; smaller sizes are centre crops
 }
+if tegra.IS_JETSON:  # Same cameras through NVIDIA's video nodes: 10-bit Bayer formats, no media-bus setup
+    CAMERAS = {"fl": (r"tevs \S+", None, "BA10", 1920, 1080, 60), "color": (r"vc_mipi \S+", None, "RG10", 4032, 3040, None)}
+GAIN = {  # Lowest, highest, step, unit, and the driver's control value for a gain. Both cameras start at the lowest
+    "fl": (1, 64, 1, "x", round),
+    "color": (0, 48, 0.1, "dB", lambda dB: round(dB * 1000)),  # Pi driver: analogue_gain in mdB (vc/vc_controls.py)
+}
+if tegra.IS_JETSON:  # VC's Jetson driver spreads its 0-48000 'gain' evenly over the sensor's gain register 0-1023, and the
+    # IMX412 amplifies by 1024 / (1024 - register): measured 1.33x at 12000 and 1.71x at 20000. So ask for the real factor.
+    GAIN["color"] = (1, 22, 0.1, "x", lambda x: round((1 - 1 / x) * 1024 * 48000 / 1023))
 EXPOSURE_US = {"fl": 4000, "color": 30000}  # Starting exposures; the drivers' own defaults (~1.2 ms fixed, 10 ms) are too dark indoors
 
 
+def open_capture(video, fmt=None):
+    """Start streaming and return VC's V4L2Capture, whose buffers run() reads in place. fmt = (width, height, fourcc) sets
+    the format first. Piping frames out of v4l2-ctl instead lost over half of them: 8 of the IMX412C's 20 fps arrived."""
+    cap = v4l2_capture.V4L2Capture(video)
+    cap.open()
+    if fmt:
+        cap.set_format(fmt[0], fmt[1], int.from_bytes(fmt[2].encode(), "little"))
+    cap.request_buffers(4)
+    for i in range(len(cap.buffers)):
+        cap.queue_buffer(i)
+    cap.stream_on()
+    return cap
+
+
+def start_jetson(name, pattern, pixfmt, width, height, fps, sink, exposure):
+    found = tegra.find_camera(pattern)
+    if not found:
+        print(f"{name}: camera not found, skipping")
+        return None
+    media, sensor, subdev, video = found
+    exposure = exposure or EXPOSURE_US[name]
+    fmt = tegra.set_format(video, width, height, pixfmt)  # IMX412C: always the full sensor, cropped to the centre in run()
+    if sensor.startswith("vc_mipi"):  # Frame rate in mHz, 0 = fastest
+        tegra.set_controls(subdev, frame_rate=round((fps or 0) * 1000), exposure=exposure)
+    else:  # TEVS: manual mode, otherwise the exposure value is ignored
+        tegra.set_controls(subdev, exposure_mode=0, exposure=exposure, **({"max_fps": fps} if fps else {}))
+    cap = open_capture(video)
+    step = max(1, width // 1280)
+    shown = preview(name, np.zeros((height, width), np.uint16), step).shape
+    window = Gst.parse_launch(f"appsrc name=src is-live=true format=time do-timestamp=true caps=video/x-raw,"
+                              f"format={'GRAY16_LE' if name == 'fl' else 'BGR'},width={shown[1]},height={shown[0]},"
+                              f"framerate={DISPLAY_FPS}/1 ! videoconvert ! {sink}")
+    print(f"{name}: {sensor} on {media} -> {video}, {width}x{height} {pixfmt}" + ("" if fmt[:2] == (width, height) else f" (centre of {fmt[0]}x{fmt[1]})"))
+    return {"cap": cap, "stop": threading.Event(), "window": window, "size": (height, width), "step": step, "frames": 0, "last": None,
+            "subdev": subdev, "exposure": exposure, "gain_control": "gain",
+            "unpack": lambda mem: tegra.window(mem, fmt, width, height) & 0xFFC0}  # As on the Pi: value << 6, low bits zero
+
+
 def start(name, pattern, mbus, pixfmt, width, height, fps, sink="autovideosink sync=false", exposure=None):
+    if tegra.IS_JETSON:
+        return start_jetson(name, pattern, pixfmt, width, height, fps, sink, exposure)
     for media in sorted(Path("/dev").glob("media*")):  # Media numbering changes between boots
         sensor = re.search(rf"entity \d+: ({pattern})", subprocess.run(
             ["media-ctl", "-d", media, "-p"], capture_output=True, text=True).stdout)
@@ -57,23 +109,26 @@ def start(name, pattern, mbus, pixfmt, width, height, fps, sink="autovideosink s
     else:  # TEVS: manual mode, otherwise the exposure value is ignored
         subprocess.run(["v4l2-ctl", "-d", subdev, "-c", "exposure_mode=0", "-c", f"exposure={exposure}"])
     video =subprocess.run(["media-ctl", "-d", media, "-e", "rp1-cfe-csi2_ch0"], capture_output=True, text=True).stdout.strip()
-    stream = subprocess.Popen(["v4l2-ctl", "-d", video, "--stream-mmap", "--stream-to=-",
-                               f"--set-fmt-video=width={width},height={height},pixelformat={pixfmt}"],
-                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                              start_new_session=True)  # Ctrl+C in the terminal must not cut a frame in half
+    cap = open_capture(video, (width, height, pixfmt))
     step = max(1, width // 1280)
     shown = preview(name, np.zeros((height, width), np.uint16), step).shape
     window = Gst.parse_launch(f"appsrc name=src is-live=true format=time do-timestamp=true caps=video/x-raw,"
                               f"format={'GRAY16_LE' if name == 'fl' else 'BGR'},width={shown[1]},height={shown[0]},"
                               f"framerate={DISPLAY_FPS}/1 ! videoconvert ! {sink}")
     print(f"{name}: {sensor[1]} on {media} -> {video}, {width}x{height} {pixfmt}")
-    return {"stream": stream, "window": window, "size": (height, width), "step": step, "frames": 0, "last": None,
-            "subdev": subdev, "exposure": exposure}
+    return {"cap": cap, "stop": threading.Event(), "window": window, "size": (height, width), "step": step, "frames": 0, "last": None,
+            "subdev": subdev, "exposure": exposure, "gain_control": "analogue_gain" if sensor[1].startswith("vc_mipi") else "gain",
+            "unpack": lambda mem: np.frombuffer(mem, np.uint16, width * height).reshape(height, width).copy()}
 
 
 def set_exposure(cam, us):  # Microseconds, applied live
     subprocess.run(["v4l2-ctl", "-d", cam["subdev"], "-c", f"exposure={us}"])
     cam["exposure"] = us
+
+
+def set_gain(name, cam, gain):  # In GAIN's unit, applied live
+    subprocess.run(["v4l2-ctl", "-d", cam["subdev"], "-c", f"{cam['gain_control']}={GAIN[name][4](gain)}"])
+    cam["gain"] = round(gain, 1)
 
 
 def preview(name, frame, step):  # Small image for the window, at most ~1280 px wide
@@ -89,14 +144,14 @@ def stretch(x, dtype):  # Brightest pixels (99.5th percentile, on a subsample fo
     return (np.clip(x / max(np.percentile(x[::4, ::4], 99.5), 1), 0, 1) ** (1 / 2.2) * np.iinfo(dtype).max).astype(dtype)
 
 
-def run(name, cam, stop):
-    height, width = cam["size"]
-    shown_at = 0
-    while not stop.is_set():
-        data = cam["stream"].stdout.read(width * height * 2)
-        if len(data) < width * height * 2:
-            break
-        frame = np.frombuffer(data, np.uint16).reshape(height, width)
+def run(name, cam):  # Capture thread: one per camera, until close() sets cam["stop"]
+    cap, shown_at = cam["cap"], 0
+    while not cam["stop"].is_set():
+        if not select.select([cap.fd], [], [], 0.2)[0]:  # No frame yet: look at the stop flag again
+            continue
+        index, _ = cap.dequeue_buffer()
+        frame = cam["unpack"](cap.buffers[index]["mem"])  # A copy, so the buffer can go straight back to the driver
+        cap.queue_buffer(index)
         if time.monotonic() - shown_at >= 1 / DISPLAY_FPS:  # Preview only: converting every frame costs too much
             shown = preview(name, frame, cam["step"]).tobytes()
             cam["window"].get_by_name("src").emit("push-buffer", Gst.Buffer.new_wrapped(shown))
@@ -104,30 +159,32 @@ def run(name, cam, stop):
         cam["last"], cam["frames"] = frame, cam["frames"] + 1
 
 
+def close(cam, thread):  # End the capture thread first: it reads the buffers that closing unmaps
+    cam["stop"].set()
+    thread.join()
+    cam["cap"].close()
+    cam["window"].set_state(Gst.State.NULL)
+
+
 if __name__ == "__main__":
     Gst.init(None)
     cams = {name: cam for name, spec in CAMERAS.items() if (cam := start(name, *spec))}
     for cam in cams.values():
         cam["window"].set_state(Gst.State.PLAYING)
-    stop = threading.Event()
-    threads = [threading.Thread(target=run, args=(name, cam, stop)) for name, cam in cams.items()]
-    for t in threads:
+    threads = {name: threading.Thread(target=run, args=(name, cam)) for name, cam in cams.items()}
+    for t in threads.values():
         t.start()
     try:
         time.sleep(RUN_SECONDS)
     except KeyboardInterrupt:
         pass
-    stop.set()
     for name, cam in cams.items():
-        cam["stream"].kill()
-    for t in threads:
-        t.join()
+        close(cam, threads[name])
     for name, cam in cams.items():
-        cam["window"].set_state(Gst.State.NULL)
         if cam["last"] is not None:
             raw = cam["last"] >> 6  # True 10-bit values, 0-1023
             np.save(f"{name}_raw10.npy", raw)
-            preview = (cam["last"] >> 8).astype(np.uint8)
-            cv2.imwrite(f"{name}.png", preview if name == "fl" else cv2.cvtColor(preview, cv2.COLOR_BayerBG2BGR))
+            small = (cam["last"] >> 8).astype(np.uint8)
+            cv2.imwrite(f"{name}.png", small if name == "fl" else cv2.cvtColor(small, cv2.COLOR_BayerBG2BGR))
         print(f"{name}: {cam['frames']} frames ({cam['frames'] / RUN_SECONDS:.1f} fps), last frame raw {cam['last'].min() >> 6 if cam['last'] is not None else '-'}"
               f"..{cam['last'].max() >> 6 if cam['last'] is not None else '-'} -> {name}_raw10.npy, {name}.png")

@@ -1,0 +1,111 @@
+--- a/tevs/tevs_main.c
++++ b/tevs/tevs_main.c
+@@ -292,6 +292,7 @@
+ #define TEVS_IMG_FORMAT_Y8				    (0x52)
+ #define TEVS_IMG_FORMAT_RAW8_BYPASS_ISP		(0x80)
+ #define TEVS_IMG_FORMAT_RAW8				(0x8A)
++#define TEVS_IMG_FORMAT_RAW10				(0x90)
+ 
+ #define TEVS_LINK_FREQUENCY_DEFAULT			400000000ull
+ #define TEVS_PIXEL_RATE_DEFAULT				200000000ull
+@@ -969,6 +970,57 @@
+ 	return tevs_i2c_write_16b(tevs, TEVS_TRIGGER_MODE, val);
+ }
+ 
++/*
++ * PATH-Imaging: RAW10 output, ported from the Raspberry Pi driver patch (patches/tevs-raw.patch).
++ * The Jetson driver takes its format from the device tree, so a mode declared as
++ * mode_type = "bayer", pixel_phase = "grbg", csi_pixel_bit_depth = "10" selects the ISP's RAW10
++ * output (0x90) instead of UYVY. Everything else is unchanged.
++ *
++ * raw10_mipi_dt is the CSI-2 data type override written to PREVIEW_MIPI_CTRL[7:2] in RAW10 mode.
++ * 0 leaves the choice to the ISP, which is what the Raspberry Pi driver writes and what delivers
++ * RAW10 (0x2b) there. Set 0x2b to force it if no frames arrive:
++ *   echo 0x2b | sudo tee /sys/module/tevs/parameters/raw10_mipi_dt
++ */
++static unsigned int raw10_mipi_dt;
++module_param(raw10_mipi_dt, uint, 0644);
++MODULE_PARM_DESC(raw10_mipi_dt,
++		 "RAW10 mode: CSI-2 data type override for PREVIEW_MIPI_CTRL[7:2] (0 = ISP default, 0x2b = RAW10)");
++
++static bool tevs_is_raw10(struct tevs *tevs)
++{
++	switch (tevs->s_data->sensor_props.sensor_modes->image_properties.pixel_format) {
++	case V4L2_PIX_FMT_SGRBG10:
++	case V4L2_PIX_FMT_SRGGB10:
++	case V4L2_PIX_FMT_SGBRG10:
++	case V4L2_PIX_FMT_SBGGR10:
++		return true;
++	default:
++		return false;
++	}
++}
++
++/* ISP preview output format for the pixel format the device tree asks for. */
++static u16 tevs_isp_format(struct tevs *tevs)
++{
++	if (tevs_is_raw10(tevs))
++		return TEVS_IMG_FORMAT_RAW10;
++
++	return tevs->s_data->sensor_props.sensor_modes->
++			image_properties.pixel_format == V4L2_PIX_FMT_GREY ?
++		TEVS_IMG_FORMAT_Y8 : TEVS_IMG_FORMAT_UYVY;
++}
++
++/* PREVIEW_MIPI_CTRL: CSI-2 data type override in bits 7:2, virtual channel in bits 1:0. */
++static u16 tevs_mipi_ctrl(struct tevs *tevs)
++{
++	if (tevs_is_raw10(tevs))
++		return (raw10_mipi_dt & 0x3F) << 2 | tevs->vc_id;
++
++	return tevs->s_data->sensor_props.sensor_modes->
++			image_properties.pixel_format == V4L2_PIX_FMT_GREY ?
++		(0x2A << 2 | tevs->vc_id) : (0x3F << 2 | tevs->vc_id);
++}
++
+ static int tevs_init_setting(struct tevs *tevs)
+ {
+ 	int ret = 0;
+@@ -981,19 +1033,13 @@
+ 
+ 	ret += tevs_i2c_write_16b(tevs,
+ 				HOST_COMMAND_ISP_CTRL_PREVIEW_FORMAT,
+-				tevs->s_data->sensor_props.sensor_modes->
+-					image_properties.pixel_format == V4L2_PIX_FMT_GREY ?
+-				TEVS_IMG_FORMAT_Y8 : TEVS_IMG_FORMAT_UYVY);
++				tevs_isp_format(tevs));
+ 	ret += tevs_i2c_write_16b(tevs,
+ 				HOST_COMMAND_ISP_CTRL_PREVIEW_HINF_CTRL,
+ 				0x10 | (tevs->continuous_clock << 5) | (tevs->data_lanes));
+ 	ret += tevs_i2c_write_16b(tevs,
+ 				HOST_COMMAND_ISP_CTRL_PREVIEW_MIPI_CTRL,
+-				tevs->s_data->sensor_props.sensor_modes->
+-					image_properties.pixel_format ==
+-					V4L2_PIX_FMT_GREY ?
+-					(0x2A << 2 | tevs->vc_id) :
+-					(0x3F << 2 | tevs->vc_id));
++				tevs_mipi_ctrl(tevs));
+ 
+ 	ret = tevs_standby(tevs, 1);
+ 	if (ret != 0) {
+@@ -2327,18 +2373,12 @@
+ 
+ 	ret = tevs_i2c_write_16b(tevs,
+ 			HOST_COMMAND_ISP_CTRL_PREVIEW_MIPI_CTRL,
+-			tevs->s_data->sensor_props.sensor_modes->
+-				image_properties.pixel_format ==
+-				V4L2_PIX_FMT_GREY ?
+-				(0x2A << 2 | tevs->vc_id) :
+-				(0x3F << 2 | tevs->vc_id));
++			tevs_mipi_ctrl(tevs));
+ 	if (ret)
+ 		return ret;
+ 	ret = tevs_i2c_write_16b(tevs,
+ 			HOST_COMMAND_ISP_CTRL_PREVIEW_FORMAT,
+-			tevs->s_data->sensor_props.sensor_modes->
+-				image_properties.pixel_format == V4L2_PIX_FMT_GREY ?
+-			TEVS_IMG_FORMAT_Y8 : TEVS_IMG_FORMAT_UYVY);
++			tevs_isp_format(tevs));
+ 	if (ret)
+ 		return ret;
+ 	ret = tevs_i2c_write_16b(tevs,

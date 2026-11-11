@@ -3,10 +3,10 @@
   FL:    TechNexion TEVS-AR0822-M on CAM/DISP 0 (mono RAW10)
   Color: Vision Components IMX412C on CAM/DISP 1 (colour RAW10, full 4032x3040 sensor; smaller sizes are centre crops)
 
-Both cameras use a fixed manual exposure, set in the Exposure box (microseconds, applied live). The live views are
+Both cameras use a fixed manual exposure and gain, set in the Exposure (microseconds) and Gain boxes, applied live. The live views are
 brightness stretched (and the colour one white balanced) like vc.to_rgb8; saved frames are not.
 Picking a size or frame rate restarts that camera. Starting modes are CAMERAS in dual_stream.py.
-Capture saves each camera's latest frame, full size, as ~/Desktop/PATH-captures/<sensor>/<time>/<size>_<fps>_<exposure>us.png
+Capture saves each camera's latest frame, full size, as ~/Desktop/PATH-captures/<sensor>/<time>/<size>_<fps>_<exposure>us_<gain>.png
 (16-bit, colour demosaiced, no white balance) and .raw (16-bit little-endian 10-bit values 0-1023, row by row, no header).
 Close the window or press Ctrl+C to stop.
 Run: uv run python camera_ui.py
@@ -22,9 +22,12 @@ gi.require_version("Gtk", "3.0")
 gi.require_version("Gst", "1.0")
 from gi.repository import GLib, Gst, Gtk
 
-from dual_stream import CAMERAS, EXPOSURE_US, run, set_exposure, start
+from dual_stream import CAMERAS, EXPOSURE_US, GAIN, close, run, set_exposure, set_gain, start
+from vc import tegra
 
 TITLES = {"fl": "FL: TEVS-AR0822-M (mono, CAM0)", "color": "Color: IMX412C (CAM1)"}
+if tegra.IS_JETSON:  # The connectors are the other way round there, and can be swapped
+    TITLES = {"fl": "FL: TEVS-AR0822-M (mono)", "color": "Color: IMX412C"}
 SENSORS = {"fl": "TEVS-AR0822-M", "color": "IMX412C"}
 CAPTURES = Path.home() / "Desktop" / "PATH-captures"  # Created on the first capture
 TEVS = [60, 30, 20, 15, 10, 5]
@@ -47,15 +50,11 @@ cams, threads, ui = {}, {}, {}
 
 
 def stop_camera(name):
-    cam = cams.pop(name)
-    cam["stream"].kill()  # Its capture thread ends when the pipe closes
-    cam["stream"].wait()
-    threads[name].join()
-    cam["window"].set_state(Gst.State.NULL)
+    close(cams.pop(name), threads[name])
 
 
 def restart(name):
-    sizes, rates, slot, info, exposure = ui[name]
+    sizes, rates, slot, info, exposure, gain = ui[name]
     if name in cams:
         stop_camera(name)
     for child in slot.get_children():
@@ -68,9 +67,10 @@ def restart(name):
     slot.show_all()
     info.set_text("")
     if cam:
+        set_gain(name, cam, gain.get_value())
         cam["window"].set_state(Gst.State.PLAYING)  # Only once the video widget is inside the window
         cam["counted"] = (0, time.monotonic())
-        cams[name], threads[name] = cam, threading.Thread(target=run, args=(name, cam, threading.Event()))
+        cams[name], threads[name] = cam, threading.Thread(target=run, args=(name, cam))
         threads[name].start()
 
 
@@ -94,13 +94,18 @@ def pick_exposure(exposure, name):
         set_exposure(cams[name], int(exposure.get_value()))
 
 
+def pick_gain(gain, name):
+    if name in cams:
+        set_gain(name, cams[name], gain.get_value())
+
+
 def capture(button):  # Takes whatever frame each camera has just delivered; saving runs in the background
     stamp = time.strftime("%Y-%m-%d_%H-%M-%S")
     for name, cam in cams.items():
         if cam["last"] is not None:
             height, width = cam["size"]
             fps = ui[name][1].get_active_id()
-            path = Path(CAPTURES, SENSORS[name], stamp, f"{width}x{height}_{fps if fps != '0' else 'max'}fps_{cam['exposure']}us")
+            path = Path(CAPTURES, SENSORS[name], stamp, f"{width}x{height}_{fps if fps != '0' else 'max'}fps_{cam['exposure']}us_{cam['gain']:g}{GAIN[name][3]}")
             threading.Thread(target=save, args=(name, cam["last"], path)).start()
     status.set_text(f"Saving {stamp} ...")
 
@@ -129,19 +134,23 @@ for name, spec in CAMERAS.items():
     sizes, rates, slot, info = Gtk.ComboBoxText(), Gtk.ComboBoxText(), Gtk.Box(), Gtk.Label()
     exposure = Gtk.SpinButton.new_with_range(1, 1000000, 500)
     exposure.set_value(EXPOSURE_US[name])
+    low, high, step, unit, _ = GAIN[name]
+    gain = Gtk.SpinButton.new_with_range(low, high, step)
     for size in MODES[name]:
         sizes.append(size, size.replace("x", " x "))
     controls = Gtk.Box(spacing=6)
-    for widget in (Gtk.Label(label="Size"), sizes, Gtk.Label(label="Frame rate"), rates, Gtk.Label(label="Exposure µs"), exposure):
+    for widget in (Gtk.Label(label="Size"), sizes, Gtk.Label(label="Frame rate"), rates, Gtk.Label(label="Exposure µs"), exposure,
+                   Gtk.Label(label=f"Gain {unit}"), gain):
         controls.pack_start(widget, False, False, 0)
-    controls.pack_end(info, False, False, 0)
-    for widget, expand in ((title, False), (slot, True), (controls, False)):
+    info.set_xalign(0)  # On its own line: beside the boxes it made the window wider than a 1920 px screen
+    for widget, expand in ((title, False), (slot, True), (controls, False), (info, False)):
         column.pack_start(widget, expand, expand, 0)
     row.pack_start(column, True, True, 0)
-    ui[name] = sizes, rates, slot, info, exposure
+    ui[name] = sizes, rates, slot, info, exposure, gain
     sizes.connect("changed", pick_size, name)
     rates.connect("changed", pick_rate, name)
     exposure.connect("value-changed", pick_exposure, name)
+    gain.connect("value-changed", pick_gain, name)
     sizes.set_active_id(f"{spec[3]}x{spec[4]}")  # Fills in the frame rates, which starts the camera
 
 button.connect("clicked", capture)

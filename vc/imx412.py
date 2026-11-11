@@ -20,10 +20,10 @@ from pathlib import Path
 
 import numpy as np
 
-from . import v4l2_capture
+from . import tegra, v4l2_capture
 from . import vc_controls as ctl
 
-FULL_WIDTH, FULL_HEIGHT = 4032, 3040  # vc_init_ctrl_imx412 in VC's vc_mipi_modules.c; docs/binning_mode.md
+FULL_WIDTH, FULL_HEIGHT = 4032, 3040  # vc_init_ctrl_imx412 in VC's vc_mipi_modules.c, as is BINNING
 MBUS_FORMAT = "SRGGB10_1X10"  # Sensor -> CSI-2 receiver: packed 10-bit Bayer ('pRAA' in docs/cropping.md)
 PIXEL_FORMAT, RG16 = "RG16", int.from_bytes(b"RG16", "little")  # Receiver -> memory: V4L2_PIX_FMT_SRGGB16, value << 6
 BINNING = {0: (1, 1), 1: (1, 2), 2: (2, 2), 3: (4, 2), 4: (8, 2), 5: (16, 2)}  # binning_mode -> (horizontal, vertical)
@@ -39,7 +39,16 @@ class Nodes:
     video: str  # /dev/videoN: frames
 
 
+TEGRA_CONTROLS = {"exposure": "exposure", "analogue_gain": "gain", "frame_rate": "frame_rate"}  # Same units as on the Pi
+RG10 = int.from_bytes(b"RG10", "little")
+
+
 def find_camera():  # docs/cropping.md step 1, over every media device because the numbering changes between boots
+    if tegra.IS_JETSON:
+        found = tegra.find_camera(r"vc_mipi \S+")
+        if not found:
+            raise RuntimeError("no vc_mipi camera: see docs/jetson-orin-nano-setup.md")
+        return Nodes(*found)
     for media in sorted(Path("/dev").glob("media*")):
         graph = subprocess.run(["media-ctl", "-d", media, "-p"], capture_output=True, text=True).stdout
         if sensor := re.search(r"entity \d+: (vc_mipi_camera \S+)", graph):
@@ -51,7 +60,7 @@ def find_camera():  # docs/cropping.md step 1, over every media device because t
 
 @dataclass
 class Mode:
-    """Output size and crop, checked against docs/binning_mode.md before anything touches the hardware."""
+    """Output size, crop and binning, checked against VC's driver tables before anything touches the hardware."""
     width: int = FULL_WIDTH
     height: int = FULL_HEIGHT
     left: int = None  # Crop origin on the (binned) sensor; None = centred
@@ -86,16 +95,18 @@ class Camera:
     """One IMX412C: open() configures and starts streaming, read() returns frames, close() releases the device."""
 
     def __init__(self, mode=None, *, exposure=None, gain=None, black_level=None, frame_rate=0,
-                 trigger_mode=ctl.TRIGGER_FREE_RUN, io_mode=ctl.IO_DISABLED, buffers=4):
+                 io_mode=ctl.IO_DISABLED, buffers=4):
         self.mode = mode or Mode()
         self.controls = {name: value for name, value in {
             "exposure": exposure, "analogue_gain": gain, "black_level": black_level, "frame_rate": frame_rate,
-            "trigger_mode": trigger_mode, "io_mode": io_mode}.items() if value is not None}
+            "io_mode": io_mode}.items() if value is not None}
         self.buffers = buffers
         self.nodes = self.fd = self.cap = None
 
     def open(self):
         self.nodes = find_camera()
+        if tegra.IS_JETSON:
+            return self._open_tegra()
         self.fd = os.open(self.nodes.subdev, os.O_RDWR)  # Kept open: each set() is then one ioctl
         configure(self.nodes, self.fd, self.mode)
         self._apply(self.controls)
@@ -104,6 +115,22 @@ class Camera:
         self.cap.set_format(self.mode.width, self.mode.height, RG16)
         if (self.cap.width, self.cap.height, self.cap.pixelformat) != (self.mode.width, self.mode.height, RG16):
             raise RuntimeError(f"driver changed the format to {self.cap.width}x{self.cap.height}")
+        self.cap.request_buffers(self.buffers)
+        for i in range(len(self.cap.buffers)):
+            self.cap.queue_buffer(i)
+        self.cap.stream_on()
+        self._settle()
+        return self
+
+    def _open_tegra(self):  # No pipeline to wire; the driver only has the full frame, so the mode's crop is done in read()
+        unsupported = [name for name in ("black_level", "io_mode") if self.controls.pop(name, 0)]
+        if unsupported or self.mode.binning:
+            raise NotImplementedError(f"{unsupported or 'binning'}: needs VC's patches to NVIDIA's tegra-camera, see docs/jetson-orin-nano-setup.md")
+        self.fmt = tegra.set_format(self.nodes.video, FULL_WIDTH, FULL_HEIGHT, "RG10")
+        self._apply(self.controls)
+        self.cap = v4l2_capture.V4L2Capture(self.nodes.video)
+        self.cap.open()
+        self.cap.get_format()
         self.cap.request_buffers(self.buffers)
         for i in range(len(self.cap.buffers)):
             self.cap.queue_buffer(i)
@@ -125,6 +152,8 @@ class Camera:
         self.close()
 
     def _apply(self, controls):
+        if tegra.IS_JETSON:
+            return tegra.set_controls(self.nodes.subdev, **{TEGRA_CONTROLS[name]: value for name, value in controls.items()})
         for name, value in controls.items():
             ctl.ctrl_set(self.fd, ctl.CID[name], value)
 
@@ -135,6 +164,8 @@ class Camera:
             self._settle()
 
     def get(self, name):
+        if tegra.IS_JETSON:
+            return tegra.get_control(self.nodes.subdev, TEGRA_CONTROLS[name])
         return ctl.ctrl_get(self.fd, ctl.CID[name])
 
     def actual_fps(self):  # Hz from the frame_rate control (mHz). Driver 0.7.0 leaves it at 0 when the maximum was asked for
@@ -145,6 +176,8 @@ class Camera:
             self.cap.capture_frame()
 
     def read(self):  # One frame as (height, width) uint16 of true 10-bit values; see docs/pixelformat.md for the >> 6
+        if tegra.IS_JETSON:
+            return tegra.window(self.cap.capture_frame(), self.fmt, self.mode.width, self.mode.height, self.mode.left, self.mode.top) >> 6
         return self.cap.capture_frame().view(np.uint16).reshape(self.mode.height, self.mode.width) >> 6
 
     def info(self):  # Everything needed to trace a frame back to how it was taken
@@ -153,7 +186,7 @@ class Camera:
                 "nodes": vars(self.nodes), "time": time.strftime("%Y-%m-%dT%H:%M:%S")}
 
 
-def sensor_name(subdev):  # Driver 0.7.0 calls the string control sensor_info ('IMX412C REV.0005'), newer ones sensor_name
+def sensor_name(subdev):  # Jetson: the driver has no name control, so this gives '(unknown)'. Driver 0.7.0 calls the string control sensor_info ('IMX412C REV.0005'), newer ones sensor_name
     out = subprocess.run(["v4l2-ctl", "-d", subdev, "--get-ctrl=sensor_info"], capture_output=True, text=True).stdout
     return out.split(":", 1)[1].strip().strip("'") if ":" in out else ctl.read_sensor_name(subdev)
 

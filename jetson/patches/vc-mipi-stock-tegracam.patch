@@ -1,0 +1,92 @@
+--- a/src/driver/vc_mipi_camera.c
++++ b/src/driver/vc_mipi_camera.c
+@@ -134,8 +134,10 @@
+ 
+         image = &mode->image_properties;
+         if (image->width != 0 && image->height != 0) {
++#ifndef PATH_STOCK_TEGRACAM
+                 *left = image->left;
+                 *top = image->top;
++#endif
+                 *width = image->width;
+                 *height = image->height;
+ 
+@@ -414,6 +416,16 @@
+         return vc_core_set_framerate(cam, val);
+ }
+ 
++/*
++ * PATH-Imaging: PATH_STOCK_TEGRACAM builds this driver against NVIDIA's unpatched tegra-camera.ko.
++ * The trigger_mode, io_mode, black_level, single_trigger and binning_mode controls and the crop
++ * origin need Vision Components' patches to nvidia-oot (patch/kernel_Xavier_39.2.0 in
++ * vc_mipi_nvidia), which add members to tegracam_ctrl_ops and sensor_image_properties and so
++ * change the layout tegra-camera.ko is built with. Without them the sensor keeps its defaults:
++ * free run, flash off, default black level, no binning, full frame. Gain, exposure and frame
++ * rate are NVIDIA's own controls and work unchanged.
++ */
++#ifndef PATH_STOCK_TEGRACAM
+ static int vc_set_trigger_mode(struct tegracam_device *tc_dev, __s64 val)
+ {
+         struct vc_cam *cam = tegracam_to_cam(tc_dev);
+@@ -450,6 +462,7 @@
+         struct vc_cam *cam = tegracam_to_cam(tc_dev);
+         return vc_sen_set_binning_mode(cam, val);
+ }
++#endif /* PATH_STOCK_TEGRACAM */
+ 
+ __u32 g_sleepR = 0;
+ __u32 g_sleepS = 0;
+@@ -865,11 +878,12 @@
+ 
+         for (i = 0; i < tcc_handler->numctrls; i++) {
+                 struct v4l2_ctrl *ctrl = tcc_handler->ctrls[i];
+-                int err = 0;
++                int __maybe_unused err = 0;
+                 if (NULL == ctrl) {
+                         vc_err(dev, "%s(): v4l2 ctrl is NULL!\n", __FUNCTION__);
+                         continue;
+                 }
++#ifndef PATH_STOCK_TEGRACAM
+                 if (TEGRA_CAMERA_CID_TRIGGER_MODE == ctrl->id) {
+                         vc_notice(dev, "%s(): Overwrite control trigger_mode (min: %d, max: %d, default: %d)\n", __FUNCTION__, 0, 8, 0);
+                         err = v4l2_ctrl_modify_range(ctrl, 0, 8, 1, 0);
+@@ -877,6 +891,7 @@
+                                 vc_err(dev, "%s(): Could not overwrite trigger_mode control!\n", __FUNCTION__);
+                         }
+                 }
++#endif
+         }
+ }
+ 
+@@ -895,12 +910,14 @@
+         TEGRA_CAMERA_CID_SENSOR_MODE_ID,
+         TEGRA_CAMERA_CID_GAIN,
+         TEGRA_CAMERA_CID_EXPOSURE,
+-        TEGRA_CAMERA_CID_BLACK_LEVEL,
+         TEGRA_CAMERA_CID_FRAME_RATE,
++#ifndef PATH_STOCK_TEGRACAM
++        TEGRA_CAMERA_CID_BLACK_LEVEL,
+         TEGRA_CAMERA_CID_TRIGGER_MODE,
+         TEGRA_CAMERA_CID_IO_MODE,
+         TEGRA_CAMERA_CID_SINGLE_TRIGGER,
+         TEGRA_CAMERA_CID_BINNING_MODE,
++#endif
+ #ifdef VC_CTRL_VALUE
+         TEGRA_CAMERA_CID_VALUE,
+ #endif
+@@ -911,12 +928,14 @@
+         .ctrl_cid_list = ctrl_cid_list,
+         .set_gain = vc_set_gain,
+         .set_exposure = vc_set_exposure,
++        .set_frame_rate = vc_set_frame_rate,
++#ifndef PATH_STOCK_TEGRACAM
+         .set_black_level = vc_set_black_level,
+         .set_single_trigger = vc_set_single_trigger,
+         .set_binning_mode = vc_set_binning_mode,
+-        .set_frame_rate = vc_set_frame_rate,
+         .set_trigger_mode = vc_set_trigger_mode,
+         .set_io_mode = vc_set_io_mode,
++#endif
+         .set_group_hold = vc_set_group_hold,
+ #ifdef VC_CTRL_VALUE
+         .set_value = vc_set_value,
