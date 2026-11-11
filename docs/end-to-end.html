@@ -725,7 +725,7 @@ journalctl -k -b | grep -iE "vc_mipi|tevs"      # what the drivers said at boot<
   <h3>Where subprocess is still used, and why that is fine</h3>
   <p>Settings still go through <code>v4l2-ctl</code> and <code>media-ctl</code>, started with <code>subprocess.run</code>. Each call carries a few bytes and happens only when you change something, so its cost does not matter:</p>
 <pre><code>subprocess.run(["v4l2-ctl", "-d", cam["subdev"], "-c", f"exposure={us}"])</code></pre>
-  <p>One frame path still uses a pipe: <code>camera_API.py</code>, the VizionSDK route on the Pi. It streams 1280 × 720 at 30 fps, about 55 MB/s, roughly a ninth of the colour camera's volume. Its speed has not been measured.</p>
+  <p>No frame goes through a pipe any more. The old route through TechNexion's SDK, <code>camera_API.py</code>, piped frames out of <code>v4l2-ctl</code>; it was removed because <code>dual_stream.py</code> reads the FL camera directly on both the Pi and the Jetson.</p>
 
   <h3>Threads</h3>
   <p>A <a class="t" href="#g-thread">thread</a> is a second line of execution inside one process. Threads share the process's memory, so no pipe is needed between them. Each camera gets its own capture thread, so one camera never waits for the other, and the window runs on the main thread so it stays responsive. A <code>threading.Event</code> is the stop flag: <code>close()</code> sets it, then <code>join()</code> waits for the thread to finish before the buffers are released.</p>
@@ -741,39 +741,33 @@ journalctl -k -b | grep -iE "vc_mipi|tevs"      # what the drivers said at boot<
   <h2>The code</h2>
   <figure>
     <div class="scroll">
-    <svg class="d" viewBox="0 0 930 366" role="img" aria-label="camera_ui.py uses dual_stream.py; capture_raw10.py uses vc/imx412.py; both use the shared capture helpers v4l2_capture and tegra, which talk to Linux. check_raw10.py uses camera_API.py, which uses vizion_cm5.py and pyvizionsdk.">
+    <svg class="d" viewBox="0 0 930 256" role="img" aria-label="camera_ui.py uses dual_stream.py; capture_raw10.py uses vc/imx412.py; both use the shared capture helpers v4l2_capture and tegra, which talk to Linux.">
       <text class="cap" x="20" y="22">YOU RUN</text><text class="cap" x="270" y="22">OUR MODULES</text><text class="cap" x="530" y="22">HELPERS</text><text class="cap" x="770" y="22">OUTSIDE OUR CODE</text>
 
       <rect class="bx" x="20" y="40" width="204" height="44" rx="6"/><text class="mb" x="34" y="59">camera_ui.py</text><text class="s" x="34" y="75">the window</text>
       <rect class="bx" x="20" y="170" width="204" height="44" rx="6"/><text class="mb" x="34" y="189">scripts/capture_raw10.py</text><text class="s" x="34" y="205">colour frames from a terminal</text>
-      <rect class="bx" x="20" y="300" width="204" height="44" rx="6"/><text class="mb" x="34" y="319">check_raw10.py</text><text class="s" x="34" y="335">are all 10 bits used?</text>
 
       <rect class="acb" x="270" y="40" width="200" height="44" rx="6"/><text class="mb" x="284" y="59">dual_stream.py</text><text class="s" x="284" y="75">start, run, preview, close</text>
       <rect class="acb" x="270" y="170" width="200" height="44" rx="6"/><text class="mb" x="284" y="189">vc/imx412.py</text><text class="s" x="284" y="205">Camera, Mode, save, to_rgb8</text>
-      <rect class="acb" x="270" y="300" width="200" height="44" rx="6"/><text class="mb" x="284" y="319">camera_API.py</text><text class="s" x="284" y="335">VizionSDK plus RAW10 (Pi)</text>
 
       <rect class="grp" x="530" y="56" width="190" height="124" rx="8"/>
       <rect class="bx" x="542" y="68" width="166" height="44" rx="6"/><text class="mb" x="554" y="87">vc/v4l2_capture.py</text><text class="s" x="554" y="103">ioctl + mmap capture</text>
       <rect class="bx" x="542" y="124" width="166" height="44" rx="6"/><text class="mb" x="554" y="143">vc/tegra.py</text><text class="s" x="554" y="159">Jetson: find, format, crop</text>
       <rect class="bx" x="530" y="196" width="190" height="44" rx="6"/><text class="mb" x="544" y="215">vc/vc_controls.py</text><text class="s" x="544" y="231">control IDs for the Pi driver</text>
-      <rect class="bx" x="530" y="300" width="190" height="44" rx="6"/><text class="mb" x="544" y="319">vizion_cm5.py</text><text class="s" x="544" y="335">CM5 workaround</text>
 
       <rect class="band" x="770" y="56" width="140" height="184" rx="8"/>
       <text class="b c" x="840" y="92">Linux</text>
       <text class="m c" x="840" y="116">/dev/video*</text><text class="m c" x="840" y="134">/dev/v4l-subdev*</text><text class="m c" x="840" y="152">/dev/media*</text>
       <text class="m c" x="840" y="184">v4l2-ctl</text><text class="m c" x="840" y="202">media-ctl</text>
-      <rect class="band" x="770" y="300" width="140" height="44" rx="6"/><text class="mb c" x="840" y="319">pyvizionsdk</text><text class="s c" x="840" y="335">TechNexion's library</text>
 
-      <path class="a" d="M224 62H269"/><path class="a" d="M224 192H269"/><path class="a" d="M224 322H269"/>
+      <path class="a" d="M224 62H269"/><path class="a" d="M224 192H269"/>
       <path class="a" d="M470 62L529 98"/>
       <path class="a" d="M470 185L529 142"/>
       <path class="a" d="M470 200L529 216"/>
-      <path class="a" d="M470 322H529"/><path class="a" d="M720 118H769"/><path class="a" d="M720 218H769"/><path class="a" d="M720 322H769"/>
-      <path class="a dsh" d="M440 300V270H840V241"/>
-      <text class="s c" x="640" y="264">v4l2-ctl pipe for RAW10</text>
+      <path class="a" d="M720 118H769"/><path class="a" d="M720 218H769"/>
     </svg>
     </div>
-    <figcaption><b>Which file uses which.</b> An arrow means "imports" or "calls". <code>dual_stream.py</code> and <code>camera_API.py</code> can also be run on their own. There are three independent routes to a frame: the UI (top), the colour-only <code>Camera</code> class (middle), and TechNexion's SDK (bottom).</figcaption>
+    <figcaption><b>Which file uses which.</b> An arrow means "imports" or "calls". <code>dual_stream.py</code> can also be run on its own. There are two independent routes to a frame: the UI (top) and the colour-only <code>Camera</code> class (bottom). Both read frames directly with V4L2.</figcaption>
   </figure>
 
   <div class="tw"><table>
@@ -786,9 +780,6 @@ journalctl -k -b | grep -iE "vc_mipi|tevs"      # what the drivers said at boot<
       <tr><th><code>vc/vc_controls.py</code></th><td>Vision Components' control IDs and ioctl helpers for their Pi driver, plus our name-to-ID table. Trigger input was removed.</td></tr>
       <tr><th><code>vc/tegra.py</code></th><td>Jetson helpers used by both routes: <code>IS_JETSON</code>, <code>find_camera</code>, <code>set_format</code>, <code>set_controls</code>, and <code>window</code>, which cuts the wanted rectangle out of a full frame.</td></tr>
       <tr><th><code>scripts/capture_raw10.py</code></th><td>Command line: grab N colour frames and save the last one.</td></tr>
-      <tr><th><code>camera_API.py</code></th><td>The FL camera through TechNexion's <a class="t" href="#g-sdk">VizionSDK</a>, with RAW10 added. Pi only.</td></tr>
-      <tr><th><code>vizion_cm5.py</code><br><code>scripts/cm5_board_id_shim.c</code></th><td>Workaround so VizionSDK finds the camera on a CM5 (explained below).</td></tr>
-      <tr><th><code>check_raw10.py</code></th><td>Prints the value range of one FL frame and how often each low-2-bit pattern occurs, to confirm real 10-bit data.</td></tr>
       <tr><th><code>scripts/*_camera_driver.sh</code><br><code>patches/</code>, <code>overlays/</code></th><td>Pi: build and install the TEVS driver with its RAW patch, and the CM5 reset-line overlay.</td></tr>
       <tr><th><code>scripts/setup_pi_user.sh</code></th><td>Sets up a new user on the shared team Pi.</td></tr>
       <tr><th><code>jetson/</code></th><td>Jetson: build, install and uninstall scripts, the combined overlay and its checker, two driver patches.</td></tr>
@@ -855,12 +846,6 @@ save(frame, "shot", info)     # shot.npy (exact values) + shot.json (how it was 
     <p><b>Read</b><a href="https://numpy.org/doc/stable/user/absolute_beginners.html" target="_blank" rel="noopener">NumPy: the absolute basics for beginners</a> · <a href="https://en.wikipedia.org/wiki/Pixel_binning" target="_blank" rel="noopener">Pixel binning</a> <i>(Wikipedia)</i> · <a href="https://github.com/VC-MIPI-modules/vc_mipi_raspi" target="_blank" rel="noopener">Vision Components' Raspberry Pi driver and docs</a> <i>(GitHub)</i></p>
   </aside>
 
-  <h3>The TechNexion SDK route</h3>
-  <p>An <a class="t" href="#g-sdk">SDK</a> is a library a vendor supplies for its own hardware. TechNexion's is <code>pyvizionsdk</code>. It lists the camera's RAW modes but can only stream UYVY, so <code>camera_API.py</code> keeps the SDK's functions and replaces four of them to stream RAW10 itself.</p>
-  <p>The SDK also refuses to find the camera on a CM5, because it only accepts the Pi 5's board name. <code>vizion_cm5.py</code> works around that with <a class="t" href="#g-ldpreload">LD_PRELOAD</a>: a Linux feature that loads a small library ahead of all others so its functions replace the standard ones. Ours replaces "open a file" so that, when the SDK reads the board name, it gets a file saying "Pi 5". Nothing else is changed. This route has not been ported to the Jetson.</p>
-  <aside class="more">
-    <p><b>Read</b><a href="https://man7.org/linux/man-pages/man8/ld.so.8.html" target="_blank" rel="noopener">ld.so(8) manual page</a> <i>(search it for LD_PRELOAD)</i> · <a href="https://github.com/TechNexion-Vision/tn-rpi-camera-driver" target="_blank" rel="noopener">TechNexion's Raspberry Pi camera driver</a> <i>(GitHub)</i></p>
-  </aside>
 </section>
 
 <!-- ============================================================ 8 -->
@@ -920,7 +905,6 @@ save(frame, "shot", info)     # shot.npy (exact values) + shot.json (how it was 
       <tr><th rowspan="2"><code>dual_stream.py</code><br>run on its own</th><td><code>fl_raw10.npy</code>, <code>color_raw10.npy</code></td><td><a class="t" href="#g-numpy">NumPy</a> arrays of the 10-bit values of each camera's last frame</td></tr>
       <tr><td><code>fl.png</code>, <code>color.png</code></td><td>8-bit previews (the top 8 of the 10 bits)</td></tr>
       <tr><th><code>scripts/capture_raw10.py</code></th><td><code>&lt;out&gt;.npy</code>, <code>&lt;out&gt;.json</code>, and <code>&lt;out&gt;.png</code> with <code>--png</code></td><td>Exact values, plus a text record of sensor, mode, controls, frame rate, device files, time, and min, max, mean</td></tr>
-      <tr><th><code>camera_API.py</code><br>run on its own</th><td><code>raw10.pgm</code></td><td>16-bit grey image with a maximum of 1023</td></tr>
     </tbody>
   </table></div>
   <p>A real example from the Jetson: <code>IMX412C/2026-11-10_16-45-37/4032x3040_maxfps_30000us_1x.raw</code>. The file name records the size, the frame-rate setting, the exposure and the gain. To load a <code>.raw</code> file you supply the size yourself:</p>
@@ -1067,8 +1051,7 @@ journalctl -k -b | grep -iE "vc_mipi|tevs"    # both drivers should report a suc
   <div class="box warn"><p><strong>Do not use <code>uv run</code> or <code>uv sync</code> on the Jetson.</strong> The project file asks for Python 3.13, the Jetson has 3.12, and the virtual environment there was made by hand. <code>uv run</code> deletes it and fails to build a new one. If that happens, <code>docs/jetson-orin-nano-setup.md</code> has the two commands that rebuild it.</p></div>
   <h3>On a Raspberry Pi</h3>
 <pre><code>uv run python camera_ui.py
-uv run python scripts/capture_raw10.py --png
-uv run python camera_API.py                  # FL camera through VizionSDK: 60 s live, saves raw10.pgm</code></pre>
+uv run python scripts/capture_raw10.py --png</code></pre>
   <p>Your user must be in the <code>video</code> and <code>i2c</code> groups. Quit with Ctrl+C, not Ctrl+Z: a paused run keeps the camera busy.</p>
   <aside class="more">
     <p><b>Read</b><a href="https://docs.astral.sh/uv/" target="_blank" rel="noopener">uv documentation</a> <i>(the Python project tool; virtual environments are explained there)</i></p>
@@ -1091,7 +1074,6 @@ uv run python camera_API.py                  # FL camera through VizionSDK: 60 s
       <tr><th>Colour camera limited to 20 fps (Jetson)</th><td>It is on the 2-lane port. Swapping ports is supported by the install script but untested.</td></tr>
       <tr><th>Binning, sensor crop, black level (Jetson)</th><td>Not available in our driver build. Measure the black level with the lens capped; do not assume the Pi's value of 64.</td></tr>
       <tr><th>Trigger input removed</th><td>Removed from our code because the vendor manual lists none for the IMX412C. The driver source does contain a slave-sync mode.</td></tr>
-      <tr><th><code>camera_API.py</code> not ported</th><td>The VizionSDK route runs on the Pi only.</td></tr>
       <tr><th>Nothing committed</th><td>The Jetson port (<code>jetson/</code>, <code>vc/tegra.py</code>, the Jetson doc) and the direct-read change exist only in the working tree on the Jetson.</td></tr>
     </tbody>
   </table></div>
@@ -1137,7 +1119,6 @@ uv run python camera_API.py                  # FL camera through VizionSDK: 60 s
     <div id="g-kernel"><dt>Kernel</dt><dd>The core of the operating system and the only software that talks to hardware.</dd></div>
     <div id="g-module"><dt>Kernel module</dt><dd>A <code>.ko</code> file of kernel code that can be loaded separately, such as a driver.</dd></div>
     <div id="g-lane"><dt>Lane</dt><dd>One pair of wires in a CSI-2 link. More lanes carry more data per second.</dd></div>
-    <div id="g-ldpreload"><dt>LD_PRELOAD</dt><dd>A Linux setting that loads a chosen library first, so its functions replace the standard ones.</dd></div>
     <div id="g-media"><dt>Media device, media-ctl</dt><dd><code>/dev/mediaN</code> holds the map of how a camera's stages are linked. <code>media-ctl</code> shows and edits it.</dd></div>
     <div id="g-mmap"><dt>mmap</dt><dd>Memory mapping. Makes a device's memory appear inside a program without copying.</dd></div>
     <div id="g-numpy"><dt>NumPy, .npy</dt><dd>Python's library for arrays of numbers. A <code>.npy</code> file stores one array exactly.</dd></div>
@@ -1145,7 +1126,6 @@ uv run python camera_API.py                  # FL camera through VizionSDK: 60 s
     <div id="g-probe"><dt>Probe</dt><dd>A driver's start-up check that its device is present and answering.</dd></div>
     <div id="g-process"><dt>Process</dt><dd>A running copy of a program, with its own private memory.</dd></div>
     <div id="g-raw10"><dt>RAW10</dt><dd>Unprocessed sensor values with 10 bits per pixel.</dd></div>
-    <div id="g-sdk"><dt>SDK, VizionSDK</dt><dd>Software development kit: a vendor's library for its hardware. VizionSDK is TechNexion's.</dd></div>
     <div id="g-select"><dt>select()</dt><dd>A call that waits, up to a time limit, until a file has something ready.</dd></div>
     <div id="g-sensor"><dt>Sensor</dt><dd>The chip with the grid of light-detecting pixels.</dd></div>
     <div id="g-stdout"><dt>stdout</dt><dd>Standard output. The stream a process's printed output goes to.</dd></div>

@@ -11,9 +11,11 @@ Both arrive as 16-bit with the 10 bits at the top (value << 6). Saves each camer
 10-bit values (fl_raw10.npy, color_raw10.npy) and as previews (fl.png, color.png).
 Run: uv run python dual_stream.py
 """
+import fcntl
 from pathlib import Path
 import re
 import select
+import struct
 import subprocess
 import threading
 import time
@@ -41,17 +43,19 @@ GAIN = {  # Lowest, highest, step, unit, and the driver's control value for a ga
 if tegra.IS_JETSON:  # VC's Jetson driver spreads its 0-48000 'gain' evenly over the sensor's gain register 0-1023, and the
     # IMX412 amplifies by 1024 / (1024 - register): measured 1.33x at 12000 and 1.71x at 20000. So ask for the real factor.
     GAIN["color"] = (1, 22, 0.1, "x", lambda x: round((1 - 1 / x) * 1024 * 48000 / 1023))
+BUFFERS = {"fl": 8, "color": 4}  # Driver buffers: the FL camera's frames are 17 ms apart and small (4 MB), the colour ones 25 MB
 EXPOSURE_US = {"fl": 4000, "color": 30000}  # Starting exposures; the drivers' own defaults (~1.2 ms fixed, 10 ms) are too dark indoors
 
 
-def open_capture(video, fmt=None):
+def open_capture(video, fmt=None, buffers=4):
     """Start streaming and return VC's V4L2Capture, whose buffers run() reads in place. fmt = (width, height, fourcc) sets
-    the format first. Piping frames out of v4l2-ctl instead lost over half of them: 8 of the IMX412C's 20 fps arrived."""
+    the format first. Piping frames out of v4l2-ctl instead lost over half of them: 8 of the IMX412C's 20 fps arrived.
+    buffers: how many frames the driver can hold while run() is busy; a frame arriving with none free is skipped."""
     cap = v4l2_capture.V4L2Capture(video)
     cap.open()
     if fmt:
         cap.set_format(fmt[0], fmt[1], int.from_bytes(fmt[2].encode(), "little"))
-    cap.request_buffers(4)
+    cap.request_buffers(buffers)
     for i in range(len(cap.buffers)):
         cap.queue_buffer(i)
     cap.stream_on()
@@ -70,7 +74,7 @@ def start_jetson(name, pattern, pixfmt, width, height, fps, sink, exposure):
         tegra.set_controls(subdev, frame_rate=round((fps or 0) * 1000), exposure=exposure)
     else:  # TEVS: manual mode, otherwise the exposure value is ignored
         tegra.set_controls(subdev, exposure_mode=0, exposure=exposure, **({"max_fps": fps} if fps else {}))
-    cap = open_capture(video)
+    cap = open_capture(video, buffers=BUFFERS[name])
     step = max(1, width // 1280)
     shown = preview(name, np.zeros((height, width), np.uint16), step).shape
     window = Gst.parse_launch(f"appsrc name=src is-live=true format=time do-timestamp=true caps=video/x-raw,"
@@ -109,7 +113,7 @@ def start(name, pattern, mbus, pixfmt, width, height, fps, sink="autovideosink s
     else:  # TEVS: manual mode, otherwise the exposure value is ignored
         subprocess.run(["v4l2-ctl", "-d", subdev, "-c", "exposure_mode=0", "-c", f"exposure={exposure}"])
     video =subprocess.run(["media-ctl", "-d", media, "-e", "rp1-cfe-csi2_ch0"], capture_output=True, text=True).stdout.strip()
-    cap = open_capture(video, (width, height, pixfmt))
+    cap = open_capture(video, (width, height, pixfmt), BUFFERS[name])
     step = max(1, width // 1280)
     shown = preview(name, np.zeros((height, width), np.uint16), step).shape
     window = Gst.parse_launch(f"appsrc name=src is-live=true format=time do-timestamp=true caps=video/x-raw,"
@@ -144,14 +148,27 @@ def stretch(x, dtype):  # Brightest pixels (99.5th percentile, on a subsample fo
     return (np.clip(x / max(np.percentile(x[::4, ::4], 99.5), 1), 0, 1) ** (1 / 2.2) * np.iinfo(dtype).max).astype(dtype)
 
 
+def take(cap):
+    """The next filled buffer: (its index, the driver's capture time for that frame in seconds). The same request as
+    V4L2Capture.dequeue_buffer, which does not return the time."""
+    buf = bytearray(88)  # struct v4l2_buffer: index at 0, type at 4, timestamp (two 64-bit numbers) at 24, memory at 60
+    struct.pack_into("I", buf, 4, v4l2_capture.V4L2_BUF_TYPE_VIDEO_CAPTURE)
+    struct.pack_into("I", buf, 60, v4l2_capture.V4L2_MEMORY_MMAP)
+    fcntl.ioctl(cap.fd, v4l2_capture.VIDIOC_DQBUF, buf)
+    seconds, microseconds = struct.unpack_from("qq", buf, 24)
+    return struct.unpack_from("I", buf, 0)[0], seconds + microseconds / 1e6
+
+
 def run(name, cam):  # Capture thread: one per camera, until close() sets cam["stop"]
     cap, shown_at = cam["cap"], 0
     while not cam["stop"].is_set():
         if not select.select([cap.fd], [], [], 0.2)[0]:  # No frame yet: look at the stop flag again
             continue
-        index, _ = cap.dequeue_buffer()
+        index, stamp = take(cap)
         frame = cam["unpack"](cap.buffers[index]["mem"])  # A copy, so the buffer can go straight back to the driver
         cap.queue_buffer(index)
+        if recorder := cam.get("recorder"):  # camera_ui.py's Record button
+            recorder.add(frame, stamp)
         if time.monotonic() - shown_at >= 1 / DISPLAY_FPS:  # Preview only: converting every frame costs too much
             shown = preview(name, frame, cam["step"]).tobytes()
             cam["window"].get_by_name("src").emit("push-buffer", Gst.Buffer.new_wrapped(shown))

@@ -80,6 +80,24 @@ Differences from the Pi to expect:
 - Open: at 1280x720 the kernel logs `corr_err: discarding frame ... err_data 256` for the TEVS, also with plain `v4l2-ctl`.
 - TEVS manual exposure works (`exposure_mode=0`, `exposure` in us): 8x the exposure gave 8x the signal.
 
+## Recording (2026-11-11)
+
+The Record button in `camera_ui.py` saves every frame of both cameras, lossless, as `.j2ks` files beside the
+captures. `recording.py` reads them back (`python recording.py file.j2ks`, `--check`, `--png N`, `--mp4`).
+
+- Each frame is compressed on the GPU with NVIDIA's nvJPEG2000 in its lossless High-Throughput mode. NVIDIA lists
+  it for Orin from CUDA 13.2; the driver here is CUDA 13.2, and the three pip packages below bring the rest, so
+  nothing is installed system-wide. The Orin Nano has no hardware video encoder, and lossless H.265 or FFV1 on
+  the CPU reached 4 and 29 fps at 1080p.
+- Measured live: FL 1080p 60 fps at 10 ms a frame, colour 4032x3040 20 fps at about 40 ms, files 12-37 % and
+  33 % of the 16-bit size, about 12 GB a minute for both. Decoded frames were compared with the camera's and
+  were identical.
+- Power mode matters. A minute in MAXN_SUPER (`sudo nvpmodel -m 2`) lost no frame. In 25W, through the UI with
+  other programs busy, the colour camera lost 2-5 % (the capture loop is late and the driver skips a frame);
+  the FL camera lost almost none. The UI's status line and `python recording.py file.j2ks` both count them.
+- The FL camera now gets 8 driver buffers instead of 4: with 4 it lost 67 of 3600 frames while recording.
+- Memory: the board has 7.5 GB shared with the GPU and no swap. Recording itself holds about 150 MB.
+
 ## Open problems
 
 - **Kernel faults while the IMX412C streams.** `journalctl -k` fills with `arm-smmu ... Unhandled context
@@ -91,13 +109,13 @@ Differences from the Pi to expect:
   `IMX412_METADATA_H=0 bash jetson/build.sh`): the faults stop, but only because every frame is thrown away
   (`corr_err: discarding frame 0 ... err_data 16384`, 0 fps). The sensor does send the 2 lines, so the fix has
   to be on the buffer side, in NVIDIA's capture driver. Keep the default of 2.
-- **`camera_API.py`** (VizionSDK) is not ported.
 - **Pi code paths** in `vc/imx412.py`, `dual_stream.py` and `camera_ui.py` got one Jetson branch each and have
   not been retested on a Pi.
 - **`uv sync` fails here**: `pyproject.toml` wants Python 3.13 and Ubuntu 24.04 has 3.12 (the GStreamer and
   GTK bindings are tied to it). `.venv` was made by hand with `uv venv --python /usr/bin/python3
-  --system-site-packages` plus `uv pip install numpy pillow opencv-python-headless pyvizionsdk`. Use
-  `.venv/bin/python`, not `uv run`.
+  --system-site-packages` plus `uv pip install numpy pillow opencv-python-headless` and, for
+  recording, `uv pip install nvidia-nvjpeg2k-cu13==0.12.0.58 nvidia-nvimgcodec-cu13==0.10.0.9
+  nvidia-cuda-runtime==13.2.86`. Use `.venv/bin/python`, not `uv run`.
 - **IMX412C black level, trigger, I/O mode, binning and sensor crop** need Vision Components' patches to
   NVIDIA's `tegra-camera` module, which we do not apply. Smaller sizes are software crops of the full frame.
   Measure the black level with the lens capped; do not assume the Pi's 64 counts.

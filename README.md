@@ -6,11 +6,11 @@ and the Vision Components IMX412C (colour, CAM/DISP 1).
 
 | | |
 |---|---|
-| `camera_ui.py`, `dual_stream.py` | Live window for both cameras with size, frame rate, exposure and capture |
+| `camera_ui.py`, `dual_stream.py` | Live window for both cameras with size, frame rate, exposure, gain, capture and (Jetson) record |
+| `recording.py` | Lossless RAW10 video: records on the Jetson's GPU, reads recordings back, exports an `.mp4` to watch |
 | `vc/` | IMX412C package: `v4l2_capture.py` and `vc_controls.py` are VC's own examples, `imx412.py` is our `Camera` class |
 | `scripts/capture_raw10.py` | Grab N IMX412C frames, save the last one (`.npy` + `.json`, `--png` preview) |
 | `docs/vc-imx412-setup.md` | IMX412C driver and boot setup |
-| `camera_API.py`, `vizion_cm5.py` | TEVS through TechNexion's VizionSDK (CM5 workaround included) |
 | `patches/`, `overlays/`, `scripts/*_camera_driver.sh` | TEVS driver build and install |
 
 ## Setup
@@ -55,7 +55,6 @@ For the IMX412C see `docs/vc-imx412-setup.md`.
 ```bash
 uv run python camera_ui.py                        # both cameras live; Capture saves to ~/Desktop/PATH-captures
 uv run python scripts/capture_raw10.py --png      # one IMX412C RAW10 frame from Python (see vc/imx412.py)
-uv run python camera_API.py                       # TEVS through VizionSDK: 60 s live RAW10, saves raw10.pgm
 ```
 
 Quit with Ctrl+C, not Ctrl+Z: a paused run keeps the camera busy.

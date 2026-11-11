@@ -20,7 +20,7 @@ export UV_CACHE_DIR=/opt/path/uv-cache
 
 [[ -d $worktree ]] || git -C "$repo" worktree add "$worktree" -b "$user-dev"
 cd "$worktree"
-uv venv --system-site-packages --allow-existing -q  # camera_API.py's window needs the system GTK/GStreamer
+uv venv --system-site-packages --allow-existing -q  # camera_ui.py needs the system GTK/GStreamer
 uv sync || echo "uv sync failed. If it says 'Permission denied' in /opt/path/uv-cache, run: sudo chmod -R g+w /opt/path/uv-cache"
 
 echo

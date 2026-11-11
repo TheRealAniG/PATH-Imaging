@@ -28,5 +28,5 @@ cfe=/sys/bus/platform/drivers/rp1-cfe csi=1f00110000.csi
 lsmod | grep -q '^tevs ' && rmmod tevs
 modprobe tevs
 [[ -e /sys/bus/platform/devices/$csi && ! -e $cfe/$csi ]] && echo "$csi" > "$cfe/bind"
-echo "TEVS driver installed and loaded. Run: ./.venv/bin/python camera_API.py"
-echo "If discovery still fails, inspect: sudo dmesg | grep -iE 'tevs|csi|i2c'"
+echo "TEVS driver installed and loaded. Run: ./.venv/bin/python camera_ui.py"
+echo "If the camera is not found, inspect: sudo dmesg | grep -iE 'tevs|csi|i2c'"
