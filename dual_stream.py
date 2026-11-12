@@ -5,7 +5,8 @@
 
 Both cameras run at a fixed manual exposure (EXPOSURE_US; set_exposure changes it live): the TEVS's auto exposure
 only works through its ISP, which RAW10 bypasses, and the VC driver has none. The windows are brightness stretched
-and gamma corrected (the colour one also white balanced) like vc.to_rgb8; the saved frames are not.
+and gamma corrected (the colour one also white balanced) like vc.to_rgb8; the frames saved here are not
+(picture() gives camera_ui.py the stretched one to save).
 
 Both arrive as 16-bit with the 10 bits at the top (value << 6). Saves each camera's last frame as raw
 10-bit values (fl_raw10.npy, color_raw10.npy) and as previews (fl.png, color.png).
@@ -139,8 +140,18 @@ def preview(name, frame, step):  # Small image for the window, at most ~1280 px 
     if name == "fl":
         return stretch(frame[::step, ::step].astype(np.float32), np.uint16)
     s = 2 * step  # Each sampled 2x2 RGGB block becomes one BGR pixel: much cheaper than demosaicing everything
-    bgr = np.dstack((frame[1::s, 1::s], frame[::s, 1::s], frame[::s, ::s])).astype(np.float32)
-    bgr *= bgr.mean() / np.maximum(bgr.mean(axis=(0, 1)), 1)  # Grey-world white balance
+    return balance(np.dstack((frame[1::s, 1::s], frame[::s, 1::s], frame[::s, ::s])))
+
+
+def picture(name, frame):  # The window's picture at full size, for saving: 16-bit mono, or 8-bit BGR with every pixel demosaiced
+    if name == "fl":
+        return stretch(frame.astype(np.float32), np.uint16)
+    return balance(cv2.cvtColor(frame, cv2.COLOR_BayerBG2BGR))  # RGGB
+
+
+def balance(bgr):  # Grey-world white balance, then the stretch
+    bgr = bgr.astype(np.float32)
+    bgr *= bgr.mean() / np.maximum(bgr.mean(axis=(0, 1)), 1)
     return stretch(bgr, np.uint8)
 
 

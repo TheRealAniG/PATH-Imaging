@@ -4,10 +4,12 @@
   Color: Vision Components IMX412C on CAM/DISP 1 (colour RAW10, full 4032x3040 sensor; smaller sizes are centre crops)
 
 Both cameras use a fixed manual exposure and gain, set in the Exposure (microseconds) and Gain boxes, applied live. The live views are
-brightness stretched (and the colour one white balanced) like vc.to_rgb8; saved frames are not.
+brightness stretched (and the colour one white balanced) like vc.to_rgb8.
 Picking a size or frame rate restarts that camera. Starting modes are CAMERAS in dual_stream.py.
 Capture saves each camera's latest frame, full size, as ~/Desktop/PATH-captures/<sensor>/<time>/<size>_<fps>_<exposure>us_<gain>.png
-(16-bit, colour demosaiced, no white balance) and .raw (16-bit little-endian 10-bit values 0-1023, row by row, no header).
+and .raw. The .png is the picture the window shows (FL 16-bit mono; colour 8-bit, demosaiced, white balanced): its brightest pixels
+are stretched to white frame by frame, so a dim frame is still visible but brightness cannot be compared between PNGs.
+The .raw is what the camera measured, unchanged: 16-bit little-endian 10-bit values 0-1023, row by row, no header.
 Record saves every frame of both cameras until it is pressed again, into the same folders as .j2ks: lossless, compressed
 on the Jetson's GPU as it goes (recording.py says how to read them and how to make an .mp4 to watch). Size and frame rate
 cannot be changed while recording. The status line counts frames lost: in the 25W power mode the colour camera loses a few
@@ -27,7 +29,7 @@ gi.require_version("Gtk", "3.0")
 gi.require_version("Gst", "1.0")
 from gi.repository import GLib, Gst, Gtk
 
-from dual_stream import CAMERAS, EXPOSURE_US, GAIN, close, run, set_exposure, set_gain, start
+from dual_stream import CAMERAS, EXPOSURE_US, GAIN, close, picture, run, set_exposure, set_gain, start
 import recording
 from vc import tegra
 
@@ -126,7 +128,7 @@ def capture(button):  # Takes whatever frame each camera has just delivered; sav
 def save(name, frame, path):
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     (frame >> 6).tofile(path + ".raw")  # True 10-bit values
-    cv2.imwrite(path + ".png", frame if name == "fl" else cv2.cvtColor(frame, cv2.COLOR_BayerBG2BGR))  # RGGB
+    cv2.imwrite(path + ".png", picture(name, frame))  # As the window shows it: the unstretched values look black when the scene is dim
     GLib.idle_add(status.set_text, f"Saved {CAPTURES}/*/{Path(path).parent.name}/")
 
 
