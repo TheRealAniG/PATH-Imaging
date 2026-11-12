@@ -38,7 +38,7 @@ CAMERAS = {  # name: entity pattern, media-bus format, V4L2 format, width, heigh
 if tegra.IS_JETSON:  # Same cameras through NVIDIA's video nodes: 10-bit Bayer formats, no media-bus setup
     CAMERAS = {"fl": (r"tevs \S+", None, "BA10", 1920, 1080, 60), "color": (r"vc_mipi \S+", None, "RG10", 4032, 3040, None)}
 GAIN = {  # Lowest, highest, step, unit, and the driver's control value for a gain. Both cameras start at the lowest
-    "fl": (1, 64, 1, "x", round),
+    "fl": (1, 180, 1, "x", round),
     "color": (0, 48, 0.1, "dB", lambda dB: round(dB * 1000)),  # Pi driver: analogue_gain in mdB (vc/vc_controls.py)
 }
 if tegra.IS_JETSON:  # VC's Jetson driver spreads its 0-48000 'gain' evenly over the sensor's gain register 0-1023, and the
