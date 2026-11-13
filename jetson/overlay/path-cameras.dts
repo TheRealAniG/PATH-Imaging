@@ -1,0 +1,465 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * PATH-Imaging camera overlay for the Jetson Orin Nano Developer Kit (p3768 carrier), L4T 39.2.
+ *
+ *   Vision Components MIPI IMX412C   colour, RAW10 RGGB    driver vc_mipi (vc_mipi_camera.ko)
+ *   TechNexion TEVS-AR0822-M         mono, RAW10 as GRBG   driver tevs (tevs.ko + patches/tevs-raw10.patch)
+ *
+ * Default wiring, as found on the board:
+ *   CAM0 (2 lanes, serial_b, mux leg 0, I2C bus 10)  IMX412C
+ *   CAM1 (4 lanes, serial_c, mux leg 1, I2C bus 9)   TEVS, with the adaptor's PCA9554 at 0x27
+ * Built with -DVC_ON_CAM1 the cameras swap: IMX412C on CAM1 with 4 lanes, TEVS on CAM0 with 2.
+ * (The mux legs come out in reverse bus order because the bootloader adds overlay nodes in front.)
+ *
+ * Each camera's nodes are the vendor's own, cut down to one camera:
+ *   VC  tegra234-p3767-camera-p3768-vc_mipi-dual.dts   vc_mipi_nvidia, branch 322-support-for-l4t-392
+ *   TN  tegra234-p3767-camera-p3768-tevs-dual-overlay.dts + tegra234-camera-rpi22-tevs.dtsi
+ *       tn-jetson-device-tree, branch tn_l4t-r39.2.ga_kernel-6.8_t23x
+ * Deliberate differences from those files, and nothing else (jetson/check_overlay.py enforces it):
+ *   IMX412C  embedded_metadata_height 1 -> 2: VC's own table gives 2 lines for the IMX412, their
+ *            file ships the generic 1, and v4l2-ctl does not stream with the wrong value.
+ *   TEVS     mode_type/pixel_phase/csi_pixel_bit_depth yuv/uyvy/16 -> bayer/grbg/10 (RAW10), and
+ *            pix_clk_hz x 16/10 so the lane rate NVIDIA derives from it stays 800 Mbit/s
+ *            (lane rate = pix_clk_hz x csi_pixel_bit_depth / num_lanes).
+ *   GPIO hog each vendor's hog is kept only for the connector its camera is on: VC holds its
+ *            connector's PWDN low; TechNexion (like NVIDIA's own overlays) holds CAM0_RST low when
+ *            its camera is on CAM0. The TEVS reset is its connector's PWDN, driven by the driver.
+ */
+/dts-v1/;
+/plugin/;
+
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/gpio/tegra234-gpio.h>
+
+#define CAM0_RST	TEGRA234_MAIN_GPIO(H, 3)
+#define CAM0_PWDN	TEGRA234_MAIN_GPIO(H, 6)
+#define CAM1_PWDN	TEGRA234_MAIN_GPIO(AC, 0)
+#define CAM_I2C_MUX	TEGRA234_AON_GPIO(CC, 3)
+
+/* module0, module1: the argument has to be expanded before it is pasted, hence two levels. */
+#define PASTE_(a, b)	a##b
+#define PASTE(a, b)	PASTE_(a, b)
+
+/*
+ * Per connector: mux leg, CSI port index, the two nvcsi endpoint unit numbers, interface name.
+ * CAM0's lanes have D1 and the clock swapped on the Orin Nano module, hence lane_polarity 6 there.
+ */
+#ifndef VC_METADATA_H  /* build.sh: IMX412_METADATA_H=0 bash jetson/build.sh, to test the kernel faults */
+#define VC_METADATA_H		"2"
+#endif
+#ifdef VC_ON_CAM1
+
+#define VC_LEG			1
+#define VC_PORT_INDEX		2
+#define VC_EP_IN		2
+#define VC_EP_OUT		3
+#define VC_SINTERFACE		"serial_c"
+#define VC_LANE_POLARITY	"0"
+#define VC_BUS_WIDTH		4
+#define VC_NUM_LANES		"4"
+#define VC_PIX_CLK_HZ		"600000000"
+#define VC_PWDN			CAM1_PWDN
+#define VC_DEVNODE		"video1"
+#define VC_DEVNAME		"vc_mipi 9-001a"
+#define VC_SYSFS		"/sys/firmware/devicetree/base/bus@0/cam_i2cmux/i2c@1/vc_mipi@1a"
+#define VC_BADGE		"jakku_rear_vc_mipi"
+#define VC_POSITION		"rear"
+#define VC_LENS			"/sys/firmware/devicetree/base/bus@0/lens@vc_mipi/"
+
+#define TEVS_LEG		0
+#define TEVS_PORT_INDEX		1
+#define TEVS_EP_IN		0
+#define TEVS_EP_OUT		1
+#define TEVS_SINTERFACE		"serial_b"
+#define TEVS_LANE_POLARITY	lane_polarity = "6";
+#define TEVS_BUS_WIDTH		2
+#define TEVS_NUM_LANES		"2"
+#define TEVS_PIX_CLK_HZ		"160000000"
+#define TEVS_PWDN		CAM0_PWDN
+#define TEVS_NODE		rpi22_tevs_a@48
+#define TEVS_EXPANDER		pca9554_a@27
+#define TEVS_EXPANDER_SUPPLY	vdd_1v8_hs
+#define TEVS_DEVNODE		"video0"
+#define TEVS_BADGE		"jakku_front_RBP194"
+#define TEVS_POSITION		"front"
+#define TEVS_SYSFS		"/sys/firmware/devicetree/base/bus@0/cam_i2cmux/i2c@0/rpi22_tevs_a@48"
+#define TEVS_LENS		"/sys/firmware/devicetree/base/bus@0/lens_tevs@RBPCV2"
+
+#define HOG_GPIOS		<CAM0_RST 0 CAM1_PWDN 0>
+#define HOG_LABELS		"cam0-rst", "cam1-pwdn"
+#define OVERLAY_NAME		"PATH Imaging: IMX412C on CAM1 (4 lanes) + TEVS RAW10 on CAM0"
+
+#else
+
+#define VC_LEG			0
+#define VC_PORT_INDEX		1
+#define VC_EP_IN		0
+#define VC_EP_OUT		1
+#define VC_SINTERFACE		"serial_b"
+#define VC_LANE_POLARITY	"6"
+#define VC_BUS_WIDTH		2
+#define VC_NUM_LANES		"2"
+#define VC_PIX_CLK_HZ		"300000000"
+#define VC_PWDN			CAM0_PWDN
+#define VC_DEVNODE		"video0"
+#define VC_DEVNAME		"vc_mipi 10-001a"
+#define VC_SYSFS		"/sys/firmware/devicetree/base/bus@0/cam_i2cmux/i2c@0/vc_mipi@1a"
+#define VC_BADGE		"jakku_front_vc_mipi"
+#define VC_POSITION		"front"
+#define VC_LENS			"/sys/firmware/devicetree/base/bus@0/lens@vc_mipi"
+
+#define TEVS_LEG		1
+#define TEVS_PORT_INDEX		2
+#define TEVS_EP_IN		2
+#define TEVS_EP_OUT		3
+#define TEVS_SINTERFACE		"serial_c"
+#define TEVS_LANE_POLARITY
+#define TEVS_BUS_WIDTH		4
+#define TEVS_NUM_LANES		"4"
+#define TEVS_PIX_CLK_HZ		"320000000"
+#define TEVS_PWDN		CAM1_PWDN
+#define TEVS_NODE		rpi22_tevs_c@48
+#define TEVS_EXPANDER		pca9554_c@27
+#define TEVS_EXPANDER_SUPPLY	vdd_1v8_sys
+#define TEVS_DEVNODE		"video1"
+#define TEVS_BADGE		"jakku_rear_RBP194"
+#define TEVS_POSITION		"rear"
+#define TEVS_SYSFS		"/sys/firmware/devicetree/base/bus@0/cam_i2cmux/i2c@1/rpi22_tevs_c@48"
+#define TEVS_LENS		"/sys/firmware/devicetree/base/bus@0/lens_tevs@RBPCV2/"
+
+#define HOG_GPIOS		<CAM0_PWDN 0>
+#define HOG_LABELS		"cam0-pwdn"
+#define OVERLAY_NAME		"PATH Imaging: IMX412C on CAM0 + TEVS RAW10 on CAM1"
+
+#endif
+
+/*
+ * One TEVS mode. The sizes and rates are TechNexion's placeholders (the driver swaps in the real
+ * AR0822 list at probe and only takes the signal properties from here), so only the four values
+ * that differ between their modes are parameters.
+ */
+#define TEVS_MODE(n, w, h, fps)						\
+	mode##n {							\
+		mclk_khz = "24000";					\
+		num_lanes = TEVS_NUM_LANES;				\
+		tegra_sinterface = TEVS_SINTERFACE;			\
+		TEVS_LANE_POLARITY					\
+		phy_mode = "DPHY";					\
+		discontinuous_clk = "yes";				\
+		dpcm_enable = "false";					\
+		cil_settletime = "0";					\
+		active_w = w;						\
+		active_h = h;						\
+		mode_type = "bayer";					\
+		pixel_phase = "grbg";					\
+		csi_pixel_bit_depth = "10";				\
+		readout_orientation = "90";				\
+		line_length = "3448";					\
+		inherent_gain = "1";					\
+		mclk_multiplier = "9.33";				\
+		pix_clk_hz = TEVS_PIX_CLK_HZ;				\
+		gain_factor = "16";					\
+		framerate_factor = "1000000";				\
+		exposure_factor = "1000000";				\
+		min_gain_val = "16";					\
+		max_gain_val = "170";					\
+		step_gain_val = "1";					\
+		default_gain = "16";					\
+		min_hdr_ratio = "1";					\
+		max_hdr_ratio = "1";					\
+		min_framerate = "2000000";				\
+		max_framerate = fps;					\
+		step_framerate = "1";					\
+		default_framerate = fps;				\
+		min_exp_time = "13";					\
+		max_exp_time = "683709";				\
+		step_exp_time = "1";					\
+		default_exp_time = "2495";				\
+		embedded_metadata_height = "0";				\
+	}
+
+/ {
+	overlay-name = OVERLAY_NAME;
+	jetson-header-name = "Jetson 24pin CSI Connector";
+	compatible = "nvidia,p3768-0000+p3767-0000", "nvidia,p3768-0000+p3767-0001",
+		     "nvidia,p3768-0000+p3767-0003", "nvidia,p3768-0000+p3767-0004",
+		     "nvidia,p3768-0000+p3767-0005", "nvidia,p3768-0000+p3767-0000-super",
+		     "nvidia,p3768-0000+p3767-0001-super", "nvidia,p3768-0000+p3767-0003-super",
+		     "nvidia,p3768-0000+p3767-0004-super", "nvidia,p3768-0000+p3767-0005-super";
+
+	fragment@0 {
+		target-path = "/";
+		__overlay__ {
+			tegra-capture-vi {
+				num-channels = <2>;
+				ports {
+					#address-cells = <1>;
+					#size-cells = <0>;
+					port@VC_LEG {
+						reg = <VC_LEG>;
+						vc_vi_in: endpoint {
+							port-index = <VC_PORT_INDEX>;
+							bus-width = <VC_BUS_WIDTH>;
+							remote-endpoint = <&vc_csi_out>;
+						};
+					};
+					port@TEVS_LEG {
+						reg = <TEVS_LEG>;
+						tevs_vi_in: endpoint {
+							port-index = <TEVS_PORT_INDEX>;
+							bus-width = <TEVS_BUS_WIDTH>;
+							remote-endpoint = <&tevs_csi_out>;
+						};
+					};
+				};
+			};
+
+			tegra-camera-platform {
+				compatible = "nvidia, tegra-camera-platform";
+				num_csi_lanes = <6>;
+				max_lane_speed = <1500000>;
+				min_bits_per_pixel = <10>;
+				vi_peak_byte_per_pixel = <2>;
+				vi_bw_margin_pct = <25>;
+				max_pixel_rate = <240000>;
+				isp_peak_byte_per_pixel = <5>;
+				isp_bw_margin_pct = <25>;
+				modules {
+					PASTE(module, VC_LEG) {
+						badge = VC_BADGE;
+						position = VC_POSITION;
+						orientation = "1";
+						drivernode0 {
+							pcl_id = "v4l2_sensor";
+							devname = VC_DEVNAME;
+							sysfs-device-tree = VC_SYSFS;
+						};
+						drivernode1 {
+							pcl_id = "v4l2_lens";
+							sysfs-device-tree = VC_LENS;
+						};
+					};
+					PASTE(module, TEVS_LEG) {
+						badge = TEVS_BADGE;
+						position = TEVS_POSITION;
+						orientation = "1";
+						drivernode0 {
+							pcl_id = "v4l2_sensor";
+							sysfs-device-tree = TEVS_SYSFS;
+						};
+						drivernode1 {
+							pcl_id = "v4l2_lens";
+							sysfs-device-tree = TEVS_LENS;
+						};
+					};
+				};
+			};
+
+			bus@0 {
+				host1x@13e00000 {
+					nvcsi@15a00000 {
+						num-channels = <2>;
+						#address-cells = <1>;
+						#size-cells = <0>;
+						channel@VC_LEG {
+							reg = <VC_LEG>;
+							ports {
+								#address-cells = <1>;
+								#size-cells = <0>;
+								port@0 {
+									reg = <0>;
+									vc_csi_in: endpoint@VC_EP_IN {
+										port-index = <VC_PORT_INDEX>;
+										bus-width = <VC_BUS_WIDTH>;
+										remote-endpoint = <&vc_out>;
+									};
+								};
+								port@1 {
+									reg = <1>;
+									vc_csi_out: endpoint@VC_EP_OUT {
+										remote-endpoint = <&vc_vi_in>;
+									};
+								};
+							};
+						};
+						channel@TEVS_LEG {
+							reg = <TEVS_LEG>;
+							ports {
+								#address-cells = <1>;
+								#size-cells = <0>;
+								port@0 {
+									reg = <0>;
+									tevs_csi_in: endpoint@TEVS_EP_IN {
+										port-index = <TEVS_PORT_INDEX>;
+										bus-width = <TEVS_BUS_WIDTH>;
+										remote-endpoint = <&tevs_out>;
+									};
+								};
+								port@1 {
+									reg = <1>;
+									tevs_csi_out: endpoint@TEVS_EP_OUT {
+										remote-endpoint = <&tevs_vi_in>;
+									};
+								};
+							};
+						};
+					};
+				};
+
+				cam_i2cmux {
+					status = "okay";
+					compatible = "i2c-mux-gpio";
+					#address-cells = <1>;
+					#size-cells = <0>;
+					i2c-parent = <&cam_i2c>;
+					mux-gpios = <&gpio_aon CAM_I2C_MUX GPIO_ACTIVE_HIGH>;
+
+					i2c@VC_LEG {
+						status = "okay";
+						reg = <VC_LEG>;
+						#address-cells = <1>;
+						#size-cells = <0>;
+
+						vc_mipi@1a {
+							reg = <0x1a>;
+							reset-gpios = <&gpio VC_PWDN GPIO_ACTIVE_HIGH>;
+							compatible = "nvidia,vc_mipi";
+							devnode = VC_DEVNODE;
+							use_sensor_mode_id = "false";
+							sensor_model = "vc_mipi";
+							num_lanes = VC_NUM_LANES;
+							trigger_mode = "0";
+							io_mode = "0";
+							physical_w = "1.000";
+							physical_h = "1.000";
+
+							mode0 {
+								num_lanes = VC_NUM_LANES;
+								tegra_sinterface = VC_SINTERFACE;
+								embedded_metadata_height = VC_METADATA_H;
+								readout_orientation = "0";
+								lane_polarity = VC_LANE_POLARITY;
+								active_l = "0";
+								active_t = "0";
+								active_w = "0";
+								active_h = "0";
+								mode_type = "bayer";
+								pixel_phase = "rggb";
+								csi_pixel_bit_depth = "10";
+								min_gain_val = "0";
+								max_gain_val = "48000";
+								step_gain_val = "100";
+								default_gain = "0";
+								min_exp_time = "1";
+								max_exp_time = "1000000";
+								step_exp_time = "1";
+								default_exp_time = "10000";
+								min_framerate = "100";
+								max_framerate = "60000";
+								step_framerate = "100";
+								default_framerate = "60000";
+								gain_factor = "1000";
+								exposure_factor = "1000000";
+								framerate_factor = "1000";
+								inherent_gain = "1";
+								min_hdr_ratio = "1";
+								max_hdr_ratio = "1";
+								line_length = "0";
+								phy_mode = "DPHY";
+								discontinuous_clk = "no";
+								mclk_khz = "24000";
+								pix_clk_hz = VC_PIX_CLK_HZ;
+								mclk_multiplier = "0.0";
+								cil_settletime = "0";
+								dpcm_enable = "false";
+								set_mode_delay_ms = "100000";
+							};
+
+							ports {
+								#address-cells = <1>;
+								#size-cells = <0>;
+								port@0 {
+									reg = <0>;
+									vc_out: endpoint {
+										port-index = <VC_PORT_INDEX>;
+										bus-width = <VC_BUS_WIDTH>;
+										remote-endpoint = <&vc_csi_in>;
+									};
+								};
+							};
+						};
+					};
+
+					i2c@TEVS_LEG {
+						status = "okay";
+						reg = <TEVS_LEG>;
+						#address-cells = <1>;
+						#size-cells = <0>;
+
+						tevs_expander: TEVS_EXPANDER {
+							compatible = "nxp,pca9554";
+							reg = <0x27>;
+							gpio-controller;
+							#gpio-cells = <2>;
+							vcc-supply = <&TEVS_EXPANDER_SUPPLY>;
+							vcc_lp = "vcc";
+							status = "okay";
+						};
+
+						TEVS_NODE {
+							compatible = "tn,tevs";
+							reg = <0x48>;
+							devnode = TEVS_DEVNODE;
+							physical_w = "3.680";
+							physical_h = "2.760";
+							sensor_model = "tevs";
+							use_sensor_mode_id = "false";
+							reset-gpios = <&gpio TEVS_PWDN GPIO_ACTIVE_HIGH>;
+							standby-gpios = <&tevs_expander 6 GPIO_ACTIVE_HIGH>;
+							status = "okay";
+
+							TEVS_MODE(0, "3280", "2464", "21000000");
+							TEVS_MODE(1, "3280", "1848", "28000000");
+							TEVS_MODE(2, "1920", "1080", "30000000");
+							TEVS_MODE(3, "1640", "1232", "30000000");
+							TEVS_MODE(4, "1280", "720", "60000000");
+							TEVS_MODE(5, "640", "480", "60000000");
+
+							ports {
+								#address-cells = <1>;
+								#size-cells = <0>;
+								port@0 {
+									reg = <0>;
+									tevs_out: endpoint {
+										port-index = <TEVS_PORT_INDEX>;
+										bus-width = <TEVS_BUS_WIDTH>;
+										remote-endpoint = <&tevs_csi_in>;
+										clock-noncontinuous;
+										link-frequencies = /bits/ 64 <400000000>;
+									};
+								};
+							};
+						};
+					};
+				};
+
+				lens_tevs@RBPCV2 {
+					min_focus_distance = "0.0";
+					hyper_focal = "0.0";
+					focal_length = "3.04";
+					f_number = "2.0";
+					aperture = "0.0";
+				};
+
+				gpio@2200000 {
+					camera-control-output-low {
+						gpio-hog;
+						output-low;
+						gpios = HOG_GPIOS;
+						label = HOG_LABELS;
+					};
+				};
+			};
+		};
+	};
+};

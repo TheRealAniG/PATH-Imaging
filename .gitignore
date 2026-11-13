@@ -14,3 +14,11 @@ uyvy_frame.png
 
 # Local vendor reference checkout; SDK is installed through uv
 /vizionsdk-python/
+
+# Dual-camera capture and Jetson build outputs
+/capture_raw10.*
+fl_raw10.npy
+color_raw10.npy
+fl.png
+color.png
+.jetson-build/

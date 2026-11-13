@@ -27,12 +27,13 @@ if ! git -C "$build/source" cat-file -e "$revision^{commit}" 2>/dev/null; then
     git -C "$build/source" fetch origin "$branch"
 fi
 git -C "$build/source" checkout --force --detach "$revision"
-# Adds AR0822 RAW8 (Y8_1X8); UYVY stays the default. Written and tested on 6.18.
-git -C "$build/source" apply "$repo_root/patches/tevs-raw8.patch"
+# TechNexion's RAW patch (SGRBG8/10/12/16 -> PREVIEW_FORMAT 0x80/0x90/0xA0/0xB0); UYVY stays the default.
+git -C "$build/source" apply "$repo_root/patches/tevs-raw.patch"
 make -C "$headers" M="$build/source/drivers/media/i2c/tevs" CONFIG_VIDEO_TEVS=m modules -j2
 cpp -nostdinc -undef -D__DTS__ -x assembler-with-cpp -I "$includes" \
     "$build/source/arch/arm64/boot/dts/overlays/tevs-rpi22-overlay.dts" > "$build/tevs-rpi22.dts"
 dtc -@ -I dts -O dtb -o "$build/tevs-rpi22.dtbo" "$build/tevs-rpi22.dts"
+dtc -@ -I dts -O dtb -o "$build/tevs-cam1-reset.dtbo" "$repo_root/overlays/tevs-cam1-reset-overlay.dts"
 cp "$build/source/drivers/media/i2c/tevs/tevs.ko" "$build/tevs.ko"
 printf '%s\n' "$release" > "$build/kernel-release"
 echo "Built driver and overlay in $build for $release. See README.md to install."
