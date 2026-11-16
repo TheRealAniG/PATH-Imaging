@@ -16,6 +16,7 @@ Read over I2C before any driver was installed:
 
 CAM0 has only 2 lanes, so the IMX412C tops out near 20 fps at full resolution there (about 40 fps on
 CAM1's 4 lanes, which is how the Pi ran it). To swap, move the cables and install with `--imx412-on cam1`.
+The board was swapped this way on 2026-11-15: see "After the connector swap" below.
 
 ## Build, install, undo
 
@@ -68,11 +69,11 @@ Differences from the Pi to expect:
 ## Measured after install
 
 - `vc_mipi 10-001a` is `/dev/video0`, `tevs 9-0048` is `/dev/video1`; controls are on each sensor's sub-device
-  node (`/dev/v4l-subdev0` and `/dev/v4l-subdev3`). `vc/tegra.py` looks all of these up by name.
+  node (`/dev/v4l-subdev0` and `/dev/v4l-subdev3`). `find_camera` in `cameras/shared.py` looks all of these up by name.
 - Pixel layout: the 10-bit value is in bits 15..6 and the low six bits repeat the top six. `>> 6` gives 0-1023.
 - IMX412C alone: 20.05 fps at 4032x3040, the driver's maximum on 2 lanes.
 - Both together through `dual_stream.py` (2026-11-10): IMX412C full frame 20 fps, TEVS 1080p 58.5 fps.
-  Both read the driver's buffers directly (`open_capture`). Before that they piped frames out of `v4l2-ctl`, and
+  Both read the driver's buffers directly (`open_capture` in `cameras/shared.py`). Before that they piped frames out of `v4l2-ctl`, and
   only 8 to 9.5 of the IMX412C's 20 fps arrived.
 - Open: the TEVS can sit in auto exposure while `exposure_mode` reads Manual. It then runs at 30.39 fps (its
   32.9 ms `ae_exposure_upper`) and ignores `exposure`. `v4l2-ctl -d /dev/v4l-subdev1 -c exposure_mode=1` followed
@@ -80,10 +81,31 @@ Differences from the Pi to expect:
 - Open: at 1280x720 the kernel logs `corr_err: discarding frame ... err_data 256` for the TEVS, also with plain `v4l2-ctl`.
 - TEVS manual exposure works (`exposure_mode=0`, `exposure` in us): 8x the exposure gave 8x the signal.
 
+## After the connector swap (2026-11-15)
+
+Installed with `sudo bash jetson/install.sh --imx412-on cam1`: IMX412C on CAM1 (4 lanes), TEVS on CAM0 (2 lanes).
+Moving the cables without that install gives "camera not found": the overlay says which camera is on which
+connector, so each driver probes the wrong one.
+
+- Why only the IMX412C gained: lanes are capacity. It sends 1.5 Gbit/s per lane, so 3.0 Gbit/s on 2 lanes and 6.0
+  on 4; a full frame at 40 fps is 4.9 Gbit/s. The TEVS sends 0.8 Gbit/s per lane, 1.6 Gbit/s on 2 lanes, and
+  1080p at 60 fps is 1.24 Gbit/s, which already fits.
+- IMX412C at 4032x3040: 40.10 fps when the exposure is 20 ms or less, 33.18 fps at the 30 ms starting exposure (a
+  frame cannot be shorter than its exposure).
+- Python receives all 40 since the frame copy runs in four bands on four threads (`unpack` in
+  `cameras/shared.py`): 9 ms a frame instead of 24 ms. Before that 27 fps arrived and the driver skipped the rest.
+  Both cameras together, no window: TEVS 1080p 60 fps and IMX412C 40 fps, none skipped in 10 s.
+- TEVS on 2 lanes: 1080p 60.00 fps and 4K 15.00 fps as asked, but 2560x1440 gives 17.55 fps when 30 or 20 is
+  asked. That size was not measured here before the swap.
+- Recording cannot follow 40 fps at full size: the GPU encodes about 20 colour frames a second in 25W mode, and a
+  4 s test dropped 63 of 140. The status line counts them.
+
 ## Recording (2026-11-11)
 
 The Record button in `camera_ui.py` saves every frame of both cameras, lossless, as `.j2ks` files beside the
 captures. `recording.py` reads them back (`python recording.py file.j2ks`, `--check`, `--png N`, `--mp4`).
+Right after Stop it also makes an `.mp4` of the live view beside each one, to watch (about 8 pictures a second, at
+most 1024 wide); `--mp4` replaces that with a video of every frame.
 
 - Each frame is compressed on the GPU with NVIDIA's nvJPEG2000 in its lossless High-Throughput mode. NVIDIA lists
   it for Orin from CUDA 13.2; the driver here is CUDA 13.2, and the three pip packages below bring the rest, so
@@ -109,8 +131,9 @@ captures. `recording.py` reads them back (`python recording.py file.j2ks`, `--ch
   `IMX412_METADATA_H=0 bash jetson/build.sh`): the faults stop, but only because every frame is thrown away
   (`corr_err: discarding frame 0 ... err_data 16384`, 0 fps). The sensor does send the 2 lines, so the fix has
   to be on the buffer side, in NVIDIA's capture driver. Keep the default of 2.
-- **Pi code paths** in `vc/imx412.py`, `dual_stream.py` and `camera_ui.py` got one Jetson branch each and have
-  not been retested on a Pi.
+- **Pi code paths** in `cameras/` (names ending in `_pi`), `dual_stream.py` and `camera_ui.py` have not been
+  retested on a Pi since the Jetson port, nor since the code was split into one file per camera (2026-11-15). A
+  simulated run shows the split issues the same `media-ctl` / `v4l2-ctl` commands and ioctls as before.
 - **`uv sync` fails here**: `pyproject.toml` wants Python 3.13 and Ubuntu 24.04 has 3.12 (the GStreamer and
   GTK bindings are tied to it). `.venv` was made by hand with `uv venv --python /usr/bin/python3
   --system-site-packages` plus `uv pip install numpy pillow opencv-python-headless` and, for

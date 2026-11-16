@@ -8,7 +8,6 @@ Capturing from the camera is not simple. It follows the sequence shown above.
 
 These are the functions we have for it:
 
-- `get_format()`
 - `set_format()`
 - `request_buffers()`
 - `queue_buffer()`
@@ -24,26 +23,20 @@ We'll use `set_format()` as the example:
 
 ```python
 def set_format(self, width, height, pixelformat):
-    """Set video format"""
-    fmt = bytearray(208)  # v4l2_format structure size
-    struct.pack_into('I', fmt, 0, V4L2_BUF_TYPE_VIDEO_CAPTURE)
-    struct.pack_into('I', fmt, 8, width)
-    struct.pack_into('I', fmt, 12, height)
-    struct.pack_into('I', fmt, 16, pixelformat)
-    struct.pack_into('I', fmt, 20, V4L2_FIELD_NONE)
-
+    fmt = bytearray(208)
+    struct.pack_into("I", fmt, FMT_TYPE, CAPTURE)
+    struct.pack_into("I", fmt, FMT_WIDTH, width)
+    struct.pack_into("I", fmt, FMT_HEIGHT, height)
+    struct.pack_into("I", fmt, FMT_PIXELFORMAT, pixelformat)
+    struct.pack_into("I", fmt, FMT_FIELD, FIELD_NONE)
     fcntl.ioctl(self.fd, VIDIOC_S_FMT, fmt)
-
-    # Read back actual values
-    self.width = struct.unpack('I', fmt[8:12])[0]
-    self.height = struct.unpack('I', fmt[12:16])[0]
-    self.pixelformat = struct.unpack('I', fmt[16:20])[0]
-
-    fmt_str = fourcc_to_string(self.pixelformat)
-    print(f"Set format: {fmt_str} ({self.width}x{self.height})")
+    # What the driver actually set
+    self.width = struct.unpack_from("I", fmt, FMT_WIDTH)[0]
+    self.height = struct.unpack_from("I", fmt, FMT_HEIGHT)[0]
+    self.pixelformat = struct.unpack_from("I", fmt, FMT_PIXELFORMAT)[0]
 ```
 
-It packs all the settings into a byte array and then sends that array with ioctl.
+It writes each setting into a byte array and then sends that array with ioctl. `"I"` is one 4-byte number. A name like `FMT_WIDTH` is where that setting sits in the array (byte 8). The functions and these names are in `cameras/shared_v4l2_capture.py`.
 
 ### Decoding the call
 
@@ -60,7 +53,7 @@ fcntl.ioctl(self.fd, VIDIOC_S_FMT, fmt)
 ### Decoding `VIDIOC_S_FMT`
 
 ```python
-VIDIOC_S_FMT = _IOWR('V', 5, 208)
+VIDIOC_S_FMT = _IOWR("V", 5, 208)
 ```
 
 `_IOWR(type, nr, size)` builds the request code:

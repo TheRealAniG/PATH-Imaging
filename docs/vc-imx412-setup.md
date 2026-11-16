@@ -44,12 +44,12 @@ v4l2-ctl --all -d /dev/v4l-subdev5 # its controls: exposure, analogue_gain, blac
 ```
 
 On the team Pi the camera is `vc_mipi_camera 0-001a` on `/dev/media1`, subdevice `/dev/v4l-subdev5`, frames on
-`/dev/video8`, but the numbers move between boots, which is why `vc.find_camera()` looks them up. VC's
+`/dev/video8`, but the numbers move between boots, which is why `cameras.imx412.find_camera()` looks them up. VC's
 `tools/self_check.sh` (in their repo) runs the same checks plus a streaming test.
 
 ## 4. Manual pipeline once, by hand
 
-This is VC's `docs/cropping.md` with our values, and exactly what `vc.imx412.configure()` does:
+This is VC's `docs/cropping.md` with our values, and exactly what `Camera._wire_pi()` in `cameras/imx412.py` does:
 
 ```bash
 M=/dev/media1; S="vc_mipi_camera 0-001a"

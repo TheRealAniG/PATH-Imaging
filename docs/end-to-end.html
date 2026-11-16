@@ -309,7 +309,7 @@ footer{margin-top:64px;padding-top:16px;border-top:1px solid var(--line);font-si
       <tr><th>Run Python with</th><td><code>uv run python …</code></td><td><code>.venv/bin/python …</code> (never <code>uv run</code>)</td></tr>
     </tbody>
   </table></div>
-  <p>The code decides which computer it is on with one line in <code>vc/tegra.py</code>: <code>IS_JETSON</code> is true when the file <code>/proc/device-tree/compatible</code> contains <code>nvidia,tegra</code>.</p>
+  <p>The code decides which computer it is on with one line in <code>cameras/shared.py</code>: <code>IS_JETSON</code> is true when the file <code>/proc/device-tree/compatible</code> contains <code>nvidia,tegra</code>.</p>
 </section>
 
 <!-- ============================================================ 2 -->
@@ -511,11 +511,11 @@ footer{margin-top:64px;padding-top:16px;border-top:1px solid var(--line);font-si
       <path class="a" d="M752 102H769"/>
       <text class="m c" x="548" y="154">/dev/v4l-subdev0</text><text class="s c" x="548" y="170">settings</text>
       <text class="m c" x="832" y="154">/dev/video0</text><text class="s c" x="832" y="170">format, frames</text>
-      <text class="s" x="486" y="206">start_jetson() sets the format once on the video node.</text>
+      <text class="s" x="486" y="206">start() sets the format once on the video node.</text>
       <text class="s" x="486" y="222">The sensor always sends the full frame; we crop in Python.</text>
     </svg>
     </div>
-    <figcaption><b>The colour camera's device files on each computer.</b> The FL camera looks the same with its own names. The name <code>vc_mipi 10-001a</code> reads as: driver <code>vc_mipi</code>, I2C bus 10, address <code>0x1a</code>. The numbers in <code>/dev/videoN</code> can change between boots, so the code finds cameras by name (<code>find_camera()</code> in <code>vc/imx412.py</code> and <code>vc/tegra.py</code>).</figcaption>
+    <figcaption><b>The colour camera's device files on each computer.</b> The FL camera looks the same with its own names. The name <code>vc_mipi 10-001a</code> reads as: driver <code>vc_mipi</code>, I2C bus 10, address <code>0x1a</code>. The numbers in <code>/dev/videoN</code> can change between boots, so the code finds cameras by name (<code>find_camera()</code> in <code>cameras/shared.py</code>).</figcaption>
   </figure>
   <div class="tw"><table>
     <thead><tr><th>File</th><th>Called</th><th>What it is for</th></tr></thead>
@@ -607,7 +607,7 @@ journalctl -k -b | grep -iE "vc_mipi|tevs"      # what the drivers said at boot<
       <text class="b" x="130" y="140">Then, for every frame: run()</text>
       <rect class="acb" x="20" y="152" width="170" height="44" rx="6"/><text class="c" x="105" y="171">wait for a frame</text><text class="m c" x="105" y="187">select(), 0.2 s at most</text>
       <rect class="acb" x="230" y="152" width="170" height="44" rx="6"/><text class="c" x="315" y="171">take the filled buffer</text><text class="m c" x="315" y="187">DQBUF</text>
-      <rect class="acb" x="440" y="152" width="170" height="44" rx="6"/><text class="c" x="525" y="171">copy the frame out</text><text class="m c" x="525" y="187">cam["unpack"]</text>
+      <rect class="acb" x="440" y="152" width="170" height="44" rx="6"/><text class="c" x="525" y="171">copy the frame out</text><text class="m c" x="525" y="187">shared.unpack()</text>
       <rect class="acb" x="650" y="152" width="170" height="44" rx="6"/><text class="c" x="735" y="171">hand the buffer back</text><text class="m c" x="735" y="187">QBUF</text>
       <path class="a" d="M190 174H229"/><path class="a" d="M400 174H439"/><path class="a" d="M610 174H649"/>
       <path class="a" d="M735 196V236H105V197"/>
@@ -618,7 +618,7 @@ journalctl -k -b | grep -iE "vc_mipi|tevs"      # what the drivers said at boot<
       <rect class="bx" x="232" y="262" width="328" height="38" rx="6"/><text class="c" x="396" y="285">close(): stream off, unmap, close the file</text>
     </svg>
     </div>
-    <figcaption><b>The V4L2 capture sequence our code follows.</b> The short names under each step are the ioctl commands; each is really prefixed <code>VIDIOC_</code>. On the Jetson the format is set just before this by a <code>v4l2-ctl</code> call, so <code>open_capture()</code> skips the second step there. The class that issues these commands is Vision Components' example, kept in <code>vc/v4l2_capture.py</code>.</figcaption>
+    <figcaption><b>The V4L2 capture sequence our code follows.</b> The short names under each step are the ioctl commands; each is really prefixed <code>VIDIOC_</code>. On the Jetson the format is set just before this by a <code>v4l2-ctl</code> call, so <code>open_capture()</code> (in <code>cameras/shared.py</code>) skips the second step there. The class that issues these commands is cut down from Vision Components' example, kept in <code>cameras/shared_v4l2_capture.py</code> and used for both cameras.</figcaption>
   </figure>
 
   <figure>
@@ -639,16 +639,18 @@ journalctl -k -b | grep -iE "vc_mipi|tevs"      # what the drivers said at boot<
     <figcaption><b>Who holds the buffers at one moment.</b> The driver refills a buffer as soon as it gets it back, so we copy the frame out first. That one copy is the only time the 24.5 MB moves.</figcaption>
   </figure>
 
-  <p>The loop itself is short. This is <code>run()</code> in <code>dual_stream.py</code>, without the preview lines:</p>
-<pre><code>def run(name, cam):                       # one thread per camera
+  <p>The loop itself is short. This is <code>run()</code> in <code>dual_stream.py</code>, without the preview and recording lines:</p>
+<pre><code>def run(cam):                                             # one thread per camera
     cap = cam["cap"]
     while not cam["stop"].is_set():
-        if not select.select([cap.fd], [], [], 0.2)[0]:   # no frame yet: check the stop flag again
+        readable, writable, failed = select.select([cap.fd], [], [], 0.2)
+        if not readable:                                  # no frame yet: check the stop flag again
             continue
-        index, _ = cap.dequeue_buffer()
-        frame = cam["unpack"](cap.buffers[index]["mem"])  # a copy
+        index, stamp = cap.dequeue_buffer()               # stamp: the capture time, for the recording
+        frame = shared.unpack(cap.buffers[index], cam["fmt"], cam["width"], cam["height"])   # a copy
         cap.queue_buffer(index)                           # the buffer goes straight back to the driver
-        cam["last"], cam["frames"] = frame, cam["frames"] + 1</code></pre>
+        cam["last"] = frame
+        cam["frames"] += 1</code></pre>
   <p><a class="t" href="#g-select">select()</a> asks the kernel "is a frame ready on this file?" and waits at most 0.2 seconds for the answer. Without the time limit, a camera that stopped sending would leave the thread waiting forever and the program could not shut down.</p>
   <aside class="more">
     <p><b>Read</b><a href="https://www.kernel.org/doc/html/latest/userspace-api/media/v4l/mmap.html" target="_blank" rel="noopener">Streaming I/O (memory mapping)</a> · <a href="https://www.kernel.org/doc/html/latest/userspace-api/media/v4l/buffer.html" target="_blank" rel="noopener">Buffers</a> <i>(kernel docs; the exact sequence in the figure)</i> · <a href="https://man7.org/linux/man-pages/man2/mmap.2.html" target="_blank" rel="noopener">mmap(2)</a> · <a href="https://man7.org/linux/man-pages/man2/select.2.html" target="_blank" rel="noopener">select(2)</a> · Python's <a href="https://docs.python.org/3/library/mmap.html" target="_blank" rel="noopener">mmap</a> and <a href="https://docs.python.org/3/library/select.html" target="_blank" rel="noopener">select</a> modules</p>
@@ -741,44 +743,46 @@ journalctl -k -b | grep -iE "vc_mipi|tevs"      # what the drivers said at boot<
   <h2>The code</h2>
   <figure>
     <div class="scroll">
-    <svg class="d" viewBox="0 0 930 256" role="img" aria-label="camera_ui.py uses dual_stream.py; capture_raw10.py uses vc/imx412.py; both use the shared capture helpers v4l2_capture and tegra, which talk to Linux.">
-      <text class="cap" x="20" y="22">YOU RUN</text><text class="cap" x="270" y="22">OUR MODULES</text><text class="cap" x="530" y="22">HELPERS</text><text class="cap" x="770" y="22">OUTSIDE OUR CODE</text>
+    <svg class="d" viewBox="0 0 930 256" role="img" aria-label="camera_ui.py uses dual_stream.py, which is for both cameras. dual_stream.py uses cameras/tevs.py for the FL camera and cameras/imx412.py for the colour camera, and cameras/shared.py for what both need. capture_raw10.py uses cameras/imx412.py alone. The shared files talk to Linux.">
+      <text class="cap" x="14" y="22">YOU RUN</text><text class="cap" x="206" y="22">BOTH CAMERAS</text><text class="cap" x="384" y="22">cameras/: ONE CAMERA EACH</text><text class="cap" x="586" y="22">cameras/: BOTH CAMERAS</text><text class="cap" x="800" y="22">OUTSIDE</text>
 
-      <rect class="bx" x="20" y="40" width="204" height="44" rx="6"/><text class="mb" x="34" y="59">camera_ui.py</text><text class="s" x="34" y="75">the window</text>
-      <rect class="bx" x="20" y="170" width="204" height="44" rx="6"/><text class="mb" x="34" y="189">scripts/capture_raw10.py</text><text class="s" x="34" y="205">colour frames from a terminal</text>
+      <rect class="bx" x="14" y="40" width="160" height="44" rx="6"/><text class="mb" x="26" y="59">camera_ui.py</text><text class="s" x="26" y="75">the window</text>
+      <rect class="bx" x="14" y="196" width="160" height="44" rx="6"/><text class="mb" x="26" y="215">capture_raw10.py</text><text class="s" x="26" y="231">in scripts/: colour frames</text>
 
-      <rect class="acb" x="270" y="40" width="200" height="44" rx="6"/><text class="mb" x="284" y="59">dual_stream.py</text><text class="s" x="284" y="75">start, run, preview, close</text>
-      <rect class="acb" x="270" y="170" width="200" height="44" rx="6"/><text class="mb" x="284" y="189">vc/imx412.py</text><text class="s" x="284" y="205">Camera, Mode, save, to_rgb8</text>
+      <rect class="acb" x="206" y="40" width="140" height="44" rx="6"/><text class="mb" x="218" y="59">dual_stream.py</text><text class="s" x="218" y="75">start, run, close</text>
 
-      <rect class="grp" x="530" y="56" width="190" height="124" rx="8"/>
-      <rect class="bx" x="542" y="68" width="166" height="44" rx="6"/><text class="mb" x="554" y="87">vc/v4l2_capture.py</text><text class="s" x="554" y="103">ioctl + mmap capture</text>
-      <rect class="bx" x="542" y="124" width="166" height="44" rx="6"/><text class="mb" x="554" y="143">vc/tegra.py</text><text class="s" x="554" y="159">Jetson: find, format, crop</text>
-      <rect class="bx" x="530" y="196" width="190" height="44" rx="6"/><text class="mb" x="544" y="215">vc/vc_controls.py</text><text class="s" x="544" y="231">control IDs for the Pi driver</text>
+      <rect class="flb" x="384" y="40" width="164" height="44" rx="6"/><text class="mb" x="392" y="59">tevs.py</text><text class="s" x="392" y="75">TEVS only: the FL camera</text>
+      <rect class="cob" x="384" y="118" width="164" height="44" rx="6"/><text class="mb" x="392" y="137">imx412.py</text><text class="s" x="392" y="153">IMX412C only: colour</text>
 
-      <rect class="band" x="770" y="56" width="140" height="184" rx="8"/>
-      <text class="b c" x="840" y="92">Linux</text>
-      <text class="m c" x="840" y="116">/dev/video*</text><text class="m c" x="840" y="134">/dev/v4l-subdev*</text><text class="m c" x="840" y="152">/dev/media*</text>
-      <text class="m c" x="840" y="184">v4l2-ctl</text><text class="m c" x="840" y="202">media-ctl</text>
+      <rect class="bx" x="586" y="40" width="180" height="44" rx="6"/><text class="mb" x="596" y="59">shared.py</text><text class="s" x="596" y="75">both: find, format, stream</text>
+      <rect class="bx" x="586" y="118" width="180" height="44" rx="6"/><text class="mb" x="596" y="137">shared_v4l2_capture.py</text><text class="s" x="596" y="153">both: ioctl + mmap capture</text>
 
-      <path class="a" d="M224 62H269"/><path class="a" d="M224 192H269"/>
-      <path class="a" d="M470 62L529 98"/>
-      <path class="a" d="M470 185L529 142"/>
-      <path class="a" d="M470 200L529 216"/>
-      <path class="a" d="M720 118H769"/><path class="a" d="M720 218H769"/>
+      <rect class="band" x="800" y="40" width="116" height="200" rx="8"/>
+      <text class="b c" x="858" y="76">Linux</text>
+      <text class="m c" x="858" y="100">/dev/video*</text><text class="m c" x="858" y="118">/dev/v4l-subdev*</text><text class="m c" x="858" y="136">/dev/media*</text>
+      <text class="m c" x="858" y="168">v4l2-ctl</text><text class="m c" x="858" y="186">media-ctl</text>
+
+      <path class="a" d="M174 62H205"/>
+      <path class="a" d="M346 62H383"/><path class="a" d="M346 74L383 130"/>
+      <path class="a" d="M276 40V30H676V39"/>
+      <path class="a" d="M174 218H366V146H383"/>
+      <path class="a" d="M548 62H585"/><path class="a" d="M548 130L585 74"/><path class="a" d="M548 140H585"/>
+      <path class="a" d="M676 84V117"/>
+      <path class="a" d="M766 62H799"/><path class="a" d="M766 140H799"/>
     </svg>
     </div>
-    <figcaption><b>Which file uses which.</b> An arrow means "imports" or "calls". <code>dual_stream.py</code> can also be run on its own. There are two independent routes to a frame: the UI (top) and the colour-only <code>Camera</code> class (bottom). Both read frames directly with V4L2.</figcaption>
+    <figcaption><b>Which file uses which.</b> An arrow means "imports" or "calls". In <code>cameras/</code> the file name says which camera the code is for: <code>tevs.py</code> is only for the FL camera, <code>imx412.py</code> only for the colour camera, <code>shared*.py</code> for both. <code>dual_stream.py</code> can also be run on its own. There are two independent routes to a frame: the UI (top) and the colour-only <code>Camera</code> class in <code>imx412.py</code> (bottom). Both read frames directly with V4L2.</figcaption>
   </figure>
 
   <div class="tw"><table>
     <thead><tr><th>File</th><th>What it does</th></tr></thead>
     <tbody>
       <tr><th><code>camera_ui.py</code></th><td>The app. A window with both live views, pickers for size and frame rate, exposure and gain boxes, the measured frame rate, and the Capture button.</td></tr>
-      <tr><th><code>dual_stream.py</code></th><td>The engine behind the UI: start a camera, run its capture thread, make previews, stop it. Run on its own, it streams both cameras for 60 s and saves each one's last frame.</td></tr>
-      <tr><th><code>vc/imx412.py</code></th><td>A <code>Camera</code> class for the colour camera alone, with <code>Mode</code> (size, crop, binning), <code>read()</code>, <code>set()</code>, <code>info()</code>, and <code>save</code>, <code>load</code>, <code>to_rgb8</code>.</td></tr>
-      <tr><th><code>vc/v4l2_capture.py</code></th><td>Vision Components' V4L2 example class: the ioctl and mmap calls from <a href="#streaming">Section 05</a>. One fix of ours: the buffer's memory offset is read from byte 64, not 68.</td></tr>
-      <tr><th><code>vc/vc_controls.py</code></th><td>Vision Components' control IDs and ioctl helpers for their Pi driver, plus our name-to-ID table. Trigger input was removed.</td></tr>
-      <tr><th><code>vc/tegra.py</code></th><td>Jetson helpers used by both routes: <code>IS_JETSON</code>, <code>find_camera</code>, <code>set_format</code>, <code>set_controls</code>, and <code>window</code>, which cuts the wanted rectangle out of a full frame.</td></tr>
+      <tr><th><code>dual_stream.py</code></th><td>The engine behind the UI, for both cameras: start a camera, run its capture thread, stop it. It holds no camera specific code; it gets that from <code>CAMERAS[name]</code>. Run on its own, it streams both cameras for 60 s and saves each one's last frame.</td></tr>
+      <tr><th><code>cameras/tevs.py</code></th><td>TEVS only (the FL camera): its device name, formats, starting mode, sizes and frame rates, exposure and gain controls, and its <code>preview()</code>.</td></tr>
+      <tr><th><code>cameras/imx412.py</code></th><td>IMX412C only (the colour camera). The same names as <code>tevs.py</code> for the live app, and a <code>Camera</code> class for the colour camera alone, with <code>Mode</code> (size, crop), <code>read()</code>, <code>set()</code>, <code>info()</code>, and <code>save</code>, <code>load</code>, <code>to_rgb8</code>.</td></tr>
+      <tr><th><code>cameras/shared_v4l2_capture.py</code></th><td>Both cameras. The ioctl and mmap calls from <a href="#streaming">Section 05</a>, cut down from Vision Components' V4L2 example class. Ours: the buffer's memory offset is read from byte 64, not 68, and <code>dequeue_buffer</code> returns the capture time.</td></tr>
+      <tr><th><code>cameras/shared.py</code></th><td>Both cameras: <code>IS_JETSON</code>, <code>find_camera</code>, <code>open_capture</code>, <code>window</code> and <code>unpack</code> (cut the wanted rectangle out of a driver frame and copy it), <code>set_controls</code>, <code>stretch</code>; for the Pi <code>wire_pi</code>; for the Jetson <code>set_format_jetson</code>. A name ending in <code>_pi</code> or <code>_jetson</code> is for that computer only.</td></tr>
       <tr><th><code>scripts/capture_raw10.py</code></th><td>Command line: grab N colour frames and save the last one.</td></tr>
       <tr><th><code>scripts/*_camera_driver.sh</code><br><code>patches/</code>, <code>overlays/</code></th><td>Pi: build and install the TEVS driver with its RAW patch, and the CM5 reset-line overlay.</td></tr>
       <tr><th><code>scripts/setup_pi_user.sh</code></th><td>Sets up a new user on the shared team Pi.</td></tr>
@@ -792,8 +796,8 @@ journalctl -k -b | grep -iE "vc_mipi|tevs"      # what the drivers said at boot<
   <ol class="steps">
     <li>The script builds the window. Each camera gets a title, a slot for the video, Size and Frame rate pickers, Exposure and Gain boxes, and an info line.</li>
     <li>Setting the starting size fills in the frame-rate list. That selection calls <code>restart(name)</code>, which is what starts each camera.</li>
-    <li><code>start()</code> in <code>dual_stream.py</code> finds the camera by name, sets its format, sets exposure and frame rate with <code>v4l2-ctl</code>, calls <code>open_capture()</code>, and builds the small display pipeline. It returns a dictionary, <code>cam</code>, that describes the running camera.</li>
-    <li>A capture thread runs <code>run(name, cam)</code>: the loop from <a href="#streaming">Section 05</a>. The newest frame is always in <code>cam["last"]</code>.</li>
+    <li><code>start()</code> in <code>dual_stream.py</code> finds the camera by name, sets its format, sets exposure and frame rate with <code>v4l2-ctl</code> (the camera's own <code>configure_pi()</code> or <code>configure_jetson()</code>), calls <code>open_capture()</code>, and builds the small display pipeline. It returns a dictionary, <code>cam</code>, that describes the running camera.</li>
+    <li><code>play(cam)</code> starts the live view and the camera's capture thread. The thread runs <code>run(cam)</code>: the loop from <a href="#streaming">Section 05</a>. The newest frame is always in <code>cam["last"]</code>.</li>
     <li>About 15 times a second the thread also makes a small preview image and pushes it to the window.</li>
     <li>Once a second <code>update_info()</code> shows size, RAW10 and the frame rate counted over that second.</li>
     <li>Changing Exposure or Gain calls <code>set_exposure</code> or <code>set_gain</code>, which run <code>v4l2-ctl</code> while the camera keeps streaming. Changing Size or Frame rate stops and restarts that camera, which took under a second on the Jetson. <span class="tag m">measured</span></li>
@@ -821,7 +825,7 @@ journalctl -k -b | grep -iE "vc_mipi|tevs"      # what the drivers said at boot<
 
       <path class="a" d="M782 84V139"/>
       <path class="a" d="M530 84V139"/><text class="s" x="538" y="104">newest frame</text>
-      <path class="a" d="M322 140V85"/><text class="s" x="330" y="104">close() + start()</text>
+      <path class="a" d="M322 140V85"/><text class="s" x="330" y="104">close(), start(), play()</text>
 
       <rect class="bx" x="440" y="234" width="180" height="38" rx="6"/><text class="c" x="530" y="258">write .raw</text>
       <rect class="bx" x="648" y="234" width="124" height="38" rx="6"/><text class="c" x="710" y="258">write .png</text>
@@ -834,14 +838,14 @@ journalctl -k -b | grep -iE "vc_mipi|tevs"      # what the drivers said at boot<
   </figure>
 
   <h3>The colour camera on its own</h3>
-  <p><code>vc/imx412.py</code> wraps the same steps in a class for scripts that only need the colour camera:</p>
-<pre><code>from vc import Camera, Mode, save, to_rgb8
+  <p><code>cameras/imx412.py</code> wraps the same steps in a class for scripts that only need the colour camera:</p>
+<pre><code>from cameras.imx412 import Camera, Mode, save, to_rgb8
 
 with Camera(Mode(4032, 3040), exposure=30000) as cam:   # exposure in µs
     frame = cam.read()        # (3040, 4032) array of true 10-bit values, 0 to 1023
     info = cam.info()         # sensor, mode, controls, frame rate, device files, time
 save(frame, "shot", info)     # shot.npy (exact values) + shot.json (how it was taken)</code></pre>
-  <p>Frames are <a class="t" href="#g-numpy">NumPy</a> arrays: grids of numbers that Python can slice and do arithmetic on quickly. On the Pi, <code>Mode</code> can ask the sensor for a smaller rectangle (a <a class="t" href="#g-crop">crop</a>) or for <a class="t" href="#g-binning">binning</a>. On the Jetson the driver only delivers the full frame, so smaller sizes are cut out in Python and binning raises an error.</p>
+  <p>Frames are <a class="t" href="#g-numpy">NumPy</a> arrays: grids of numbers that Python can slice and do arithmetic on quickly. On the Pi, <code>Mode</code> asks the sensor for a smaller rectangle (a <a class="t" href="#g-crop">crop</a>). On the Jetson the driver only delivers the full frame, so smaller sizes are cut out in Python. Our code does not use <a class="t" href="#g-binning">binning</a>.</p>
   <aside class="more">
     <p><b>Read</b><a href="https://numpy.org/doc/stable/user/absolute_beginners.html" target="_blank" rel="noopener">NumPy: the absolute basics for beginners</a> · <a href="https://en.wikipedia.org/wiki/Pixel_binning" target="_blank" rel="noopener">Pixel binning</a> <i>(Wikipedia)</i> · <a href="https://github.com/VC-MIPI-modules/vc_mipi_raspi" target="_blank" rel="noopener">Vision Components' Raspberry Pi driver and docs</a> <i>(GitHub)</i></p>
   </aside>
@@ -868,7 +872,7 @@ save(frame, "shot", info)     # shot.npy (exact values) + shot.json (how it was 
     <figcaption><b>What <code>preview()</code> and <code>stretch()</code> do to a colour frame.</b> The FL view skips white balance and stays 16-bit grey. At 1920 × 1080 it is not shrunk.</figcaption>
   </figure>
   <ul>
-    <li><strong>Sample.</strong> The preview is kept to about 1280 pixels wide. For the full colour frame that means taking one 2 × 2 block in every three, in each direction.</li>
+    <li><strong>Sample.</strong> A frame 2560 pixels wide or wider is thinned for the preview: every 2nd pixel is kept from 2560 wide, every 3rd from 3840. For the full colour frame that means taking one 2 × 2 block in every three, in each direction.</li>
     <li><strong><a class="t" href="#g-wb">White balance</a>.</strong> The sensor's green pixels respond more strongly than red and blue. The "grey world" method scales the three colours until their averages match.</li>
     <li><strong>Stretch.</strong> The brightest pixels (the 99.5th percentile) are mapped to white, so a dim scene still fills the display's range.</li>
     <li><strong><a class="t" href="#g-gamma">Gamma</a>.</strong> Raising values to the power 1 / 2.2 brightens dark tones the way screens expect.</li>
@@ -1069,12 +1073,12 @@ uv run python scripts/capture_raw10.py --png</code></pre>
       <tr><th>Kernel faults while the colour camera streams (Jetson)</th><td>The kernel log fills with memory-fault messages, about one per frame. Frames look intact. It never happens with the FL camera alone. The suspect is the sensor's two lines of embedded data; declaring zero lines stops the faults only because every frame is then discarded.</td></tr>
       <tr><th>FL camera stuck in automatic exposure (Jetson)</th><td>The camera can run in auto exposure while its <code>exposure_mode</code> control reads Manual. It then delivers 30.39 fps and ignores <code>exposure</code>. Setting <code>exposure_mode</code> to 1 and back to 0 cured it. What puts it in that state is not known.</td></tr>
       <tr><th>FL camera at 1280 × 720 (Jetson)</th><td>The kernel logs <code>corr_err: discarding frame</code>, also with plain <code>v4l2-ctl</code>. Not retested since the exposure cure above.</td></tr>
-      <tr><th>Pi code paths not rerun</th><td>Each of <code>vc/imx412.py</code>, <code>dual_stream.py</code> and <code>camera_ui.py</code> gained a Jetson branch, and the pipe was replaced on both paths. None of it has been run on a Pi since.</td></tr>
+      <tr><th>Pi code paths not rerun</th><td>The capture code gained Jetson branches, the pipe was replaced on both paths, and the code was then split into one file per camera (<code>cameras/</code>). A simulated run shows the split issues the same commands on the Pi as before, but none of it has been run on a Pi since.</td></tr>
       <tr><th>Colour camera frame rate on the Pi</th><td>Vision Components' Pi driver delivered 22.07 fps when asked for 30, so the code asks for 1.35 times the wanted rate.</td></tr>
       <tr><th>Colour camera limited to 20 fps (Jetson)</th><td>It is on the 2-lane port. Swapping ports is supported by the install script but untested.</td></tr>
       <tr><th>Binning, sensor crop, black level (Jetson)</th><td>Not available in our driver build. Measure the black level with the lens capped; do not assume the Pi's value of 64.</td></tr>
       <tr><th>Trigger input removed</th><td>Removed from our code because the vendor manual lists none for the IMX412C. The driver source does contain a slave-sync mode.</td></tr>
-      <tr><th>Nothing committed</th><td>The Jetson port (<code>jetson/</code>, <code>vc/tegra.py</code>, the Jetson doc) and the direct-read change exist only in the working tree on the Jetson.</td></tr>
+      <tr><th>Nothing committed</th><td>The Jetson port (<code>jetson/</code>, <code>cameras/shared.py</code>, the Jetson doc) and the direct-read change exist only in the working tree on the Jetson.</td></tr>
     </tbody>
   </table></div>
 </section>

@@ -1,31 +1,26 @@
-"""Lossless RAW10 video: recorded on the Jetson's GPU by the Record button in camera_ui.py, read back here.
+"""Lossless RAW10 video: recorded by camera_ui.py's Record button, read back here.
 
-Every frame is compressed on its own with JPEG 2000 in its lossless mode (High-Throughput variant, NVIDIA nvJPEG2000),
-so what comes back is bit for bit the 10-bit values the camera delivered. This is not JPEG: nothing is rounded and
-nothing is reduced to 8 bits. One file per camera, <name>.j2ks:
+Each frame is compressed on its own with lossless JPEG 2000 (High-Throughput), so what comes back is bit for bit what
+the camera delivered. On a Jetson the GPU compresses (NVIDIA nvJPEG2000). Anywhere else, the Raspberry Pi included,
+the CPU does (OpenJPH, from the imagecodecs package): the same files, far slower, so a camera that sends more than
+the CPU can compress loses frames, which are counted. One file per camera, <name>.j2ks:
 
-    line 1   "PATH RAW10 recording 1"
-    line 2   JSON: camera, sensor, width, height, pattern, frame rate, exposure, gain, start time, ...
-    then, for each frame:  8 bytes  the driver's capture time (float64, seconds, monotonic clock)
-                           4 bytes  length of the picture that follows (uint32)
-                           a JPEG 2000 codestream. Mono: one 10-bit plane. Colour: the four Bayer planes
-                           (R, G on the red row, G on the blue row, B), each half the width and height.
+    line 1     "PATH RAW10 recording 1"
+    line 2     JSON: camera, sensor, width, height, pattern, frame rate, exposure, gain, start time, ...
+    per frame  8 bytes capture time (float64, seconds, the driver's monotonic clock), 4 bytes length (uint32), then a
+               JPEG 2000 codestream. Mono: one 10-bit plane. Colour: the four Bayer planes (R, G on the red row,
+               G on the blue row, B), each half the width and height.
 
-Measured on the Jetson Orin Nano with both cameras live: 1920x1080 at 60 fps takes 10 ms a frame and 4032x3040 at
-20 fps about 40 ms, at 12-37 % and 33 % of the 16-bit size (about 12 GB a minute for both). A minute in MAXN_SUPER
-power mode lost no frame; in 25W mode, with other programs busy, the colour camera lost 2-5 in a hundred.
-Recording needs the GPU; reading does not (OpenCV decodes the frames, more slowly).
+Reading uses NVIDIA's decoder, OpenJPH or OpenCV, whichever is installed. A copy to watch, <name>.mp4, is made beside
+the recording right after it stops: lossy 8-bit H.264 of the pictures the live view showed, which is not every frame.
 
-Read a recording:
-    from recording import Recording
-    rec = Recording("file.j2ks")     # rec.info, len(rec), rec.times; rec[i] is a (height, width) uint16 array of 0-1023
-From the shell:
-    python recording.py file.j2ks                what is in it, and how many frames are missing (gaps in the capture times)
-    python recording.py file.j2ks --check        also decodes every frame
-    python recording.py file.j2ks --png 0        frame 0 as a 16-bit PNG beside it (colour demosaiced, not white balanced)
-    python recording.py file.j2ks --mp4          a viewing copy beside it: the picture the live preview shows, as H.264.
-                                                 Lossy and 8-bit; the recording is not changed.
+    rec = Recording("file.j2ks")              # rec.info, len(rec), rec.times; rec[i] is (height, width) uint16, 0-1023
+    python recording.py file.j2ks             what is in it, and how many frames are missing
+    python recording.py file.j2ks --check     also decodes every frame
+    python recording.py file.j2ks --png 0     frame 0 as a 16-bit PNG beside it (colour demosaiced)
+    python recording.py file.j2ks --mp4       replaces that .mp4 with one of every frame, at the live view's full size
 """
+import collections
 from concurrent.futures import ThreadPoolExecutor
 import json
 import os
@@ -42,12 +37,17 @@ SUFFIX = ".j2ks"
 MAGIC = b"PATH RAW10 recording 1\n"
 FRAME = struct.Struct("<dI")  # Capture time, length
 PLANES = ((0, 0), (0, 1), (1, 0), (1, 1))  # Row and column offset of each Bayer plane in the mosaic
-WAITING_BYTES = 60e6  # Frames waiting for the encoder may hold this much memory (at least 3 frames); beyond it frames are dropped
+WAITING_BYTES = 60e6  # Memory for frames waiting for the encoder (at least 3 frames); beyond it frames are dropped
+CPU_THREADS = max(1, (os.cpu_count() or 4) - 1)  # Without a GPU each recording compresses this many frames at once
+VIDEO_FPS = 15  # About how often the live view gets a picture (dual_stream.DISPLAY_FPS)
+VIDEO_WIDEST = 1024  # The .mp4 made of a recording is at most this wide
+ENCODE = ("videoconvert ! video/x-raw,format=I420 "  # Left alone, colour becomes 4:4:4, which players refuse
+          "! x264enc speed-preset=veryfast tune=zerolatency bitrate=6000 "  # zerolatency: no picture is held back, so none is lost at the end
+          "! h264parse ! mp4mux ! filesink name=out")
+RECORDING, ENCODING, LOCK = 0, set(), threading.Lock()  # How many Recorders are open; the Videos making their .mp4, paused while that is not 0
 
 
-def _nvidia():
-    """NVIDIA's image codec module. Its first import prints errors about formats we do not use (TIFF, JPEG), so that
-    one import runs with the error output switched off; a real failure still raises ImportError."""
+def _nvidia():  # NVIDIA's image codec module. Its first import prints errors about formats we do not use: stderr is off for it
     if "nvidia.nvimgcodec" not in sys.modules:
         sys.stderr.flush()
         keep, null = os.dup(2), os.open(os.devnull, os.O_WRONLY)
@@ -61,54 +61,176 @@ def _nvidia():
     return sys.modules["nvidia.nvimgcodec"]
 
 
-def unavailable():
-    """None if this machine can record, otherwise the reason as text."""
+def encoder():  # What compresses recordings on this machine: "gpu" (NVIDIA nvJPEG2000), "cpu" (OpenJPH) or None
     try:
-        encoders = _nvidia().get_encoder_ids()
+        if "nvjpeg2k_encoder" in _nvidia().get_encoder_ids():
+            return "gpu"
     except ImportError:
-        return "recording needs the nvidia-nvimgcodec-cu13 and nvidia-nvjpeg2k-cu13 packages (Jetson only)"
-    return None if "nvjpeg2k_encoder" in encoders else "no GPU JPEG 2000 encoder on this machine"
+        pass
+    try:
+        import imagecodecs
+        return "cpu" if imagecodecs.HTJ2K.available else None
+    except ImportError:
+        return None
+
+
+def unavailable():  # None if this machine can record, otherwise the reason
+    return None if encoder() else "recording needs the imagecodecs package (uv sync); a Jetson can use NVIDIA's nvimgcodec and nvjpeg2k instead"
+
+
+def _background(megapixels):
+    """For a thread that compresses on the CPU: capture and the window go first, and so does a camera with smaller
+    frames. Then one that sends more than the CPU can compress (full-size colour) loses its own frames, not the
+    other camera's. Linux gives each thread its own niceness."""
+    os.setpriority(os.PRIO_PROCESS, threading.get_native_id(), min(19, 10 + round(megapixels / 2)))
+
+
+class Video:
+    """An .mp4 to watch: lossy 8-bit H.264 of the pictures the live view shows (16-bit grey or 8-bit BGR), each at its
+    capture time. fps: about how many pictures a second to expect; the encoder plans its bit rate on it.
+
+    live is for while recording. H.264 runs on the CPU, and encoding then cost the colour camera frames, so add() only
+    stores the pictures (thinned to VIDEO_WIDEST, never waiting: one there is no room for is left out) in <name>.mkv,
+    and close() starts turning that into the .mp4 in the background; done is set once the .mp4 is there.
+    Otherwise the .mp4 is written as the pictures come, every one, at its own size.
+    error says why there is no .mp4, if there is none (None otherwise): the recording itself does not depend on it."""
+    def __init__(self, path, fps, live=False):
+        import gi
+        gi.require_version("Gst", "1.0")
+        from gi.repository import Gst
+        Gst.init(None)
+        self.Gst, self.path, self.fps, self.live, self.first = Gst, Path(path), max(1, round(fps)), live, None
+        self.stored = self.path.with_suffix(".mkv") if live else self.path
+        self.done = threading.Event()
+        self.error = next((f"no .mp4: GStreamer has no {name} (sudo apt install gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly)"
+                           for name in ("matroskamux", "matroskademux", "x264enc", "h264parse", "mp4mux") if not Gst.ElementFactory.find(name)), None)
+        if self.error:
+            return self.done.set()
+        self.pipe = self._start("appsrc name=src format=time " + (
+            "max-buffers=30 leaky-type=downstream ! matroskamux ! filesink name=out" if live else "max-buffers=4 block=true ! " + ENCODE), self.stored)
+        self.src = self.pipe.get_by_name("src")
+
+    def _start(self, description, out, source=None, playing=True):
+        pipe = self.Gst.parse_launch(description)
+        pipe.get_by_name("out").set_property("location", str(out))
+        if source:
+            pipe.get_by_name("in").set_property("location", str(source))
+        pipe.set_state(self.Gst.State.PLAYING if playing else self.Gst.State.PAUSED)
+        return pipe
+
+    def _wait(self, pipe):  # Until the pipeline has written its file: True, or it failed: False
+        return pipe.get_bus().timed_pop_filtered(self.Gst.CLOCK_TIME_NONE, self.Gst.MessageType.EOS | self.Gst.MessageType.ERROR).type == self.Gst.MessageType.EOS
+
+    def add(self, shown, stamp):
+        if self.error:
+            return
+        step = -(-shown.shape[1] // VIDEO_WIDEST) if self.live else 1
+        shown = shown[::step, ::step]
+        shown = shown[:shown.shape[0] // 2 * 2, :shown.shape[1] // 4 * 4]  # H.264 wants even sizes, GStreamer rows of whole 4 bytes
+        if shown.dtype != np.uint8:
+            shown = (shown >> 8).astype(np.uint8)
+        if self.first is None:
+            self.first = self.last = stamp
+            self.src.set_property("caps", self.Gst.Caps.from_string(
+                f"video/x-raw,format={'GRAY8' if shown.ndim == 2 else 'BGR'},width={shown.shape[1]},height={shown.shape[0]},framerate={self.fps}/1"))
+        buffer = self.Gst.Buffer.new_wrapped(shown.tobytes())
+        buffer.pts = buffer.dts = int((stamp - self.first) * self.Gst.SECOND)
+        if stamp > self.last:  # Only the last picture's is used (the others end where the next begins); without it players skip that picture
+            buffer.duration = int((stamp - self.last) * self.Gst.SECOND)
+        self.last = stamp
+        self.src.emit("push-buffer", buffer)
+
+    def close(self):  # Finishes the file. live: returns once the pictures are stored; done says when the .mp4 is made
+        if self.error:
+            return
+        if self.first is None:  # Not a single picture: nothing to play, no file
+            self.pipe.set_state(self.Gst.State.NULL)
+            self.stored.unlink(missing_ok=True)
+            return self.done.set()
+        self.src.emit("end-of-stream")
+        self._wait(self.pipe)
+        self.pipe.set_state(self.Gst.State.NULL)
+        if self.live:
+            threading.Thread(target=self._encode).start()
+        else:
+            self.done.set()
+
+    def _encode(self):  # The stored pictures into the .mp4, pausing while anything records
+        with LOCK:  # So a recording that starts or ends right now finds this pipeline
+            self.encoder = self._start("filesrc name=in ! matroskademux ! " + ENCODE, self.path, self.stored, playing=not RECORDING)
+            ENCODING.add(self)
+        made = self._wait(self.encoder)
+        with LOCK:
+            ENCODING.discard(self)
+        self.encoder.set_state(self.Gst.State.NULL)
+        if made:
+            self.stored.unlink()
+        else:
+            self.error = f"no .mp4: making it failed; the pictures are in {self.stored.name}"
+        self.done.set()
+
+
+def _recording(change):  # A recording starts (1) or ends (-1): .mp4s are only made while none runs
+    global RECORDING
+    with LOCK:
+        RECORDING += change
+        for video in ENCODING:
+            video.encoder.set_state(video.Gst.State.PAUSED if RECORDING else video.Gst.State.PLAYING)
 
 
 class Recorder:
-    def __init__(self, path, name, height, width, info):
-        """Start recording (height, width) frames of camera name ('fl' is mono, 'color' is Bayer RGGB) to path.
-        info: a dict of anything worth keeping with the file. Returns once the GPU encoder is ready."""
-        self.path, self.mono = Path(path), name == "fl"
+    def __init__(self, path, name, height, width, info, mono):
+        """Record (height, width) frames of camera name to path; returns once the encoder is ready.
+        info: a dict kept in the file's header. mono: one plane, otherwise Bayer RGGB (the camera's MONO)."""
+        self.path, self.mono, self.gpu = Path(path), mono, encoder() == "gpu"
         self.written = self.dropped = self.bytes = 0
         self.error = None
         self.started = time.time()
         self.times = []  # Capture time of every frame offered, to count the ones the camera skipped
-        self.buf = np.empty((height, width, 1) if self.mono else (4, height // 2, width // 2), np.uint16)
+        self.buf = np.empty((height, width, 1) if mono else (4, height // 2, width // 2), np.uint16)  # GPU: the frame as the encoder takes it
         self.waiting = queue.Queue(max(3, int(WAITING_BYTES // (width * height * 2))))
-        self.pool = ThreadPoolExecutor(4)  # Splits a colour frame into its planes: 6 ms on four threads, 13 ms on one
+        if self.gpu:
+            self.pool = ThreadPoolExecutor(4)  # Splits a colour frame into its planes: 6 ms on four threads, 13 ms on one
+        else:
+            self.pool = ThreadPoolExecutor(CPU_THREADS, initializer=_background, initargs=[width * height / 1e6])  # Each compresses whole frames
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.file = open(self.path, "wb", buffering=0)
         self.file.write(MAGIC + json.dumps({
-            **info, "camera": name, "width": width, "height": height, "pattern": "mono" if self.mono else "RGGB", "bits": 10,
-            "codec": "JPEG 2000 High-Throughput, lossless", "planes": 1 if self.mono else 4,
+            **info, "camera": name, "width": width, "height": height, "pattern": "mono" if mono else "RGGB", "bits": 10,
+            "codec": "JPEG 2000 High-Throughput, lossless", "encoder": "NVIDIA nvJPEG2000 (GPU)" if self.gpu else "OpenJPH (CPU)",
+            "planes": 1 if mono else 4,
             "started": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(self.started))}).encode() + b"\n")
+        self.video = Video(self.path.with_suffix(".mp4"), VIDEO_FPS, live=True)
+        _recording(1)
         self.ready = threading.Event()
-        self.thread = threading.Thread(target=self._encode)
+        self.thread = threading.Thread(target=self._encode if self.gpu else self._encode_cpu)
         self.thread.start()
         self.ready.wait()
 
-    def add(self, frame, stamp):
-        """One frame as the capture loop has it (10-bit value << 6) with the driver's capture time. Never waits."""
+    def add(self, frame, stamp):  # One frame as the capture loop has it (value << 6) and its capture time. Never waits
         self.times.append(stamp)
         try:
             self.waiting.put_nowait((stamp, frame))
         except queue.Full:
             self.dropped += 1
 
-    def _image(self, n, frame):  # True 10-bit values in the layout the encoder takes, in one pass over the frame
+    def show(self, shown, stamp):  # A picture the live view is showing and its frame's capture time: for the .mp4. Never waits
+        self.video.add(shown, stamp)
+
+    def _image(self, n, frame):  # The true 10-bit values in the layout the encoder takes
         if self.mono:
             np.right_shift(frame, 6, out=self.buf[:, :, 0])
             return n.as_image(self.buf, precision=10)
         list(self.pool.map(lambda plane: np.right_shift(frame[PLANES[plane][0]::2, PLANES[plane][1]::2], 6, out=self.buf[plane]), range(4)))
         return n.as_image(self.buf, sample_format=n.SampleFormat.P_UNCHANGED, precision=10)
 
-    def _encode(self):
+    def _write(self, stamp, data):
+        data = memoryview(data)
+        self.file.write(FRAME.pack(stamp, data.nbytes))
+        self.file.write(data)
+        self.written, self.bytes = self.written + 1, self.bytes + data.nbytes
+
+    def _encode(self):  # Encoder thread, GPU
         n = _nvidia()
         try:
             encoder = n.Encoder(backends=[n.Backend(n.BackendKind.GPU_ONLY)])
@@ -116,8 +238,8 @@ class Recorder:
                 quality_type=n.QualityType.LOSSLESS, color_spec=n.ColorSpec.GRAY if self.mono else n.ColorSpec.UNCHANGED,
                 jpeg2k_encode_params=n.Jpeg2kEncodeParams(ht=True, bitstream_type=n.Jpeg2kBitstreamType.J2K))
             shape = self.buf.shape[:2] if self.mono else (self.buf.shape[1] * 2, self.buf.shape[2] * 2)
-            noise = np.random.default_rng(0).integers(0, 1024, shape, np.uint16) << 6  # As hard to compress as a frame gets
-            encoder.encode(self._image(n, noise), "jpeg2k", params=params)  # The first one is slow: do it before recording
+            noise = np.random.default_rng(0).integers(0, 1024, shape, np.uint16) << 6
+            encoder.encode(self._image(n, noise), "jpeg2k", params=params)  # The first encode is slow: do it before recording
         except Exception as error:
             self.error = f"GPU encoder did not start: {error}"
         self.ready.set()
@@ -126,26 +248,55 @@ class Recorder:
                 continue  # Keep emptying the queue so close() returns
             stamp, frame = item
             try:
-                data = memoryview(encoder.encode(self._image(n, frame), "jpeg2k", params=params))
-                self.file.write(FRAME.pack(stamp, data.nbytes))
-                self.file.write(data)
-                self.written, self.bytes = self.written + 1, self.bytes + data.nbytes
+                self._write(stamp, encoder.encode(self._image(n, frame), "jpeg2k", params=params))
             except Exception as error:
                 self.error = f"stopped after {self.written} frames: {error}"
+
+    def _compress(self, frame):  # CPU, in a pool thread: one frame as the codestream the GPU would write (OpenJPH)
+        import imagecodecs
+        if self.mono:
+            return imagecodecs.htj2k_encode(frame >> 6, bitspersample=10)
+        planes = np.empty((4, frame.shape[0] // 2, frame.shape[1] // 2), np.uint16)
+        for plane, (row, column) in zip(planes, PLANES):
+            np.right_shift(frame[row::2, column::2], 6, out=plane)
+        return imagecodecs.htj2k_encode(planes, planar=True, rgb=False, bitspersample=10)
+
+    def _encode_cpu(self):  # Encoder thread, CPU: frames are compressed several at once and written in the order they came
+        try:
+            self._compress(np.zeros((self.buf.shape[0], self.buf.shape[1]) if self.mono else (self.buf.shape[1] * 2, self.buf.shape[2] * 2), np.uint16))
+        except Exception as error:
+            self.error = f"CPU encoder did not start: {error}"
+        self.ready.set()
+        pending, item = collections.deque(), ()  # (capture time, frame being compressed), oldest first
+        while item is not None:
+            try:
+                item = self.waiting.get(timeout=0.05)
+            except queue.Empty:
+                item = ()
+            if item and not self.error:
+                pending.append((item[0], self.pool.submit(self._compress, item[1])))
+            while pending and (item is None or pending[0][1].done() or len(pending) >= CPU_THREADS):  # Full: wait for the oldest, and the queue fills
+                stamp, compressed = pending.popleft()
+                try:
+                    self._write(stamp, compressed.result())
+                except Exception as error:
+                    self.error = f"stopped after {self.written} frames: {error}"
 
     @property
     def skipped(self):  # Frames the camera did not deliver while recording
         return missing(self.times)[0]
 
-    def close(self):  # Saves the frames still waiting, then closes the file
+    def close(self):  # Saves the frames still waiting and closes the file; the .mp4 follows (video.done)
         self.waiting.put(None)
         self.thread.join()
         self.pool.shutdown()
         self.file.close()
+        _recording(-1)
+        self.video.close()
 
 
 def missing(times):
-    """(frames missing, frames per second) from capture times: a camera's frames are evenly spaced, so a gap of two
+    """(frames missing, frames per second) from capture times. A camera's frames are evenly spaced, so a gap of two
     frame times means the driver had no free buffer for one frame."""
     if len(times) < 3:
         return 0, 0.0
@@ -154,22 +305,29 @@ def missing(times):
     return int(np.maximum(np.rint(gaps / interval) - 1, 0).sum()), 1 / interval
 
 
-def _decoder():
-    """A function turning one stored picture into its planes, shape (planes, height, width). NVIDIA's decoder when it is
-    installed, otherwise OpenCV, which is all another computer needs."""
+def _decoder():  # A function from one stored picture to its planes, (planes, height, width): NVIDIA's decoder if installed, else OpenJPH, else OpenCV
     try:
         n = _nvidia()
-        decoder = n.Decoder()
-        params = n.DecodeParams(color_spec=n.ColorSpec.UNCHANGED, allow_any_depth=True)
+        decoder, params = n.Decoder(), n.DecodeParams(color_spec=n.ColorSpec.UNCHANGED, allow_any_depth=True)
         return lambda data: np.asarray(decoder.decode(data, params=params).cpu()).transpose(2, 0, 1)
     except ImportError:
-        import cv2
-        cv2.setLogLevel(2)  # Errors only: it warns on every frame that the pictures name no colour space
+        pass
+    try:
+        import imagecodecs
+        if imagecodecs.HTJ2K.available:
+            def planes(data):
+                image = imagecodecs.htj2k_decode(data)
+                return image.reshape(-1, *image.shape[-2:])  # Mono comes back without the planes axis
+            return planes
+    except ImportError:
+        pass
+    import cv2
+    cv2.utils.logging.setLogLevel(cv2.utils.logging.LOG_LEVEL_ERROR)  # It warns on every frame that the pictures name no colour space
 
-        def planes(data):
-            image = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_UNCHANGED)
-            return image[None] if image.ndim == 2 else image[:, :, [2, 1, 0, 3]].transpose(2, 0, 1)  # OpenCV swaps planes 0 and 2
-        return planes
+    def planes(data):
+        image = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_UNCHANGED)
+        return image[None] if image.ndim == 2 else image[:, :, [2, 1, 0, 3]].transpose(2, 0, 1)  # OpenCV swaps planes 0 and 2
+    return planes
 
 
 class Recording:
@@ -179,8 +337,7 @@ class Recording:
         if self.file.readline() != MAGIC:
             raise ValueError(f"{path} is not a PATH RAW10 recording")
         self.info = json.loads(self.file.readline())
-        self.times, self.where = [], []
-        end = self.path.stat().st_size
+        self.times, self.where, end = [], [], self.path.stat().st_size
         while len(head := self.file.read(FRAME.size)) == FRAME.size:
             stamp, length = FRAME.unpack(head)
             if self.file.tell() + length > end:
@@ -194,8 +351,7 @@ class Recording:
     def __len__(self):
         return len(self.where)
 
-    def __getitem__(self, i):
-        """Frame i as a (height, width) uint16 array of the 10-bit values, 0-1023."""
+    def __getitem__(self, i):  # Frame i: (height, width) uint16 of the 10-bit values, 0-1023
         self._decode = self._decode or _decoder()
         offset, length = self.where[range(len(self))[i]]
         self.file.seek(offset)
@@ -207,8 +363,7 @@ class Recording:
             frame[row::2, column::2] = plane
         return frame
 
-    def skipped(self):
-        """(frames the camera skipped, frames per second it ran at), from the capture times."""
+    def skipped(self):  # (frames the camera skipped, frames per second it ran at)
         return missing(self.times)
 
     def close(self):
@@ -216,35 +371,15 @@ class Recording:
         self.file.close()
 
 
-def to_mp4(rec, out):
-    """A viewing copy: each frame as the live preview shows it (stretched, colour white balanced), H.264 in an .mp4."""
-    import gi
-    gi.require_version("Gst", "1.0")
-    from gi.repository import Gst
-    from dual_stream import preview
-    Gst.init(None)
-    name, fps = rec.info["camera"], max(1, round(rec.skipped()[1]))
-    pipe = None
+def to_mp4(rec, out):  # A copy to watch: every frame as the live view shows it, at its capture time
+    from cameras import CAMERAS
+    preview, step = CAMERAS[rec.info["camera"]].preview, max(1, rec.info["width"] // (1280 if rec.info["pattern"] == "mono" else 2000))  # Colour halves again: 4032 wide becomes 1008
+    video = Video(out, rec.skipped()[1])
     for i in range(len(rec)):
-        shown = preview(name, rec[i] << 6, max(1, rec.info["width"] // (1280 if name == "fl" else 2000)))  # Colour halves again: 4032 wide becomes 1008
-        shown = (shown >> 8).astype(np.uint8) if name == "fl" else shown
-        shown = np.ascontiguousarray(shown[:shown.shape[0] // 2 * 2, :shown.shape[1] // 2 * 2])  # H.264 wants even sizes
-        if pipe is None:
-            pipe = Gst.parse_launch(
-                f"appsrc name=src format=time caps=video/x-raw,format={'GRAY8' if name == 'fl' else 'BGR'},width={shown.shape[1]},"
-                f"height={shown.shape[0]},framerate={fps}/1 ! videoconvert ! video/x-raw,format=I420 "  # Left alone, colour becomes 4:4:4, which players refuse
-                f"! x264enc speed-preset=veryfast bitrate=6000 ! h264parse "
-                f"! mp4mux ! filesink location={out}")
-            pipe.set_state(Gst.State.PLAYING)
-        buffer = Gst.Buffer.new_wrapped(shown.tobytes())
-        buffer.pts = buffer.dts = i * Gst.SECOND // fps
-        buffer.duration = Gst.SECOND // fps
-        pipe.get_by_name("src").emit("push-buffer", buffer)
+        video.add(preview(rec[i] << 6, step), rec.times[i])
         print(f"\r{i + 1} of {len(rec)} frames", end="", flush=True)
-    pipe.get_by_name("src").emit("end-of-stream")
-    pipe.get_bus().timed_pop_filtered(Gst.CLOCK_TIME_NONE, Gst.MessageType.EOS | Gst.MessageType.ERROR)
-    pipe.set_state(Gst.State.NULL)
-    print(f"\rsaved {out} ({fps} fps, {shown.shape[1]}x{shown.shape[0]})")
+    video.close()
+    print(f"\rsaved {out}" + " " * 20)
 
 
 if __name__ == "__main__":
@@ -252,11 +387,11 @@ if __name__ == "__main__":
         sys.exit(__doc__)
     rec = Recording(sys.argv[1])
     print(*(f"{key}: {value}" for key, value in rec.info.items()), sep="\n")
-    gone, fps = rec.skipped()
+    (gone, fps), size = rec.skipped(), rec.path.stat().st_size
     raw = len(rec) * rec.info["width"] * rec.info["height"] * 2
     seconds = rec.times[-1] - rec.times[0] if len(rec) > 1 else 0
     print(f"{len(rec)} frames over {seconds:.1f} s at {fps:.2f} frames/s; {gone} missing; "
-          f"{rec.path.stat().st_size / 1e6:.0f} MB, {100 * rec.path.stat().st_size / max(raw, 1):.1f} % of the {raw / 1e6:.0f} MB as 16-bit raw")
+          f"{size / 1e6:.0f} MB, {100 * size / max(raw, 1):.1f} % of the {raw / 1e6:.0f} MB as 16-bit raw")
     if "--check" in sys.argv:
         for i in range(len(rec)):
             frame = rec[i]
