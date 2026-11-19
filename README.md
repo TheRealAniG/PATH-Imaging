@@ -67,9 +67,26 @@ Quit with Ctrl+C, not Ctrl+Z: a paused run keeps the camera busy.
 `python recording.py file.j2ks` says what is in a recording and how many frames are missing; `recording.py`'s first
 lines show how to read the frames in Python.
 
-- **Jetson**: the GPU compresses. Both cameras at 24 fps, colour at full size, lose no frames (measured).
-- **Pi**: the CPU compresses (OpenJPH, installed by `uv sync`), which is far slower. Not yet run on a Pi. On the
-  Jetson's CPU, both cameras at 1920x1080 and 24 fps lose no frames, and full-size colour only saves about 8 frames a
-  second, so pick a smaller colour size or a lower frame rate before recording. The status line counts frames lost.
+- **Jetson**: the GPU compresses the frames as they come. Both cameras at 24 fps, colour at full size, lose no frames
+  (measured).
+- **Pi**: the CPU compresses (OpenJPH, installed by `uv sync`), slower than the cameras send. So every frame is first
+  stored raw in `<name>.frames/` beside the recording (packed to 10 bits a pixel, written straight to the disk), and
+  background threads compress the stored frames into the `.j2ks`: while recording as far as the cores allow, and with
+  all cores after Stop. Not yet run on a Pi; measured on the Jetson with its GPU switched off, both cameras at 24 fps:
+  - Both at 1920x1080, 60 s: no frame lost. 77 % of the frames were compressed at Stop, the rest 23 s later. About
+    2 GB per recorded minute wait on the disk.
+  - Colour at full size, 20 s: 0, 0 and 1 colour frame skipped in three runs. At Stop 82 % of the FL frames and 16 %
+    of the colour frames were compressed; the rest took 50 to 60 s. About 20 GB per recorded minute wait on the disk,
+    which has to take 430 MB/s.
+  - Compressing gives way to recording: fewer threads while a recording runs, and none for 10 s after a camera
+    skipped a frame or while frames pile up in memory.
+  - The status line shows the frames still waiting, counts them down after Stop, and shows the free disk space;
+    recording stops by itself when less than 10 GB is free. Closing the window waits for the waiting frames.
+    After Ctrl+C or a power loss, `python recording.py file.j2ks --finish` compresses the rest; so does the next
+    start of `camera_ui.py`.
+  - For full size, test the disk first:
+    `dd if=/dev/zero of=~/Desktop/speed.bin bs=1M count=30000 oflag=direct status=progress`, then delete the file.
+    Under about 450 MB/s on a Pi 5 NVMe, `dtparam=pciex1_gen=3` in `/boot/firmware/config.txt` may help; otherwise
+    record colour smaller or slower. Frames the disk cannot take are counted as dropped in the status line.
 - The `.mp4` needs GStreamer's `x264enc` and `h264parse` (`gstreamer1.0-plugins-ugly`, `-bad`). Without them the
   recording is still saved and the status line says why there is no `.mp4`.

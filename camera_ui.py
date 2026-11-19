@@ -7,14 +7,17 @@ the picture the window shows, at full size (FL 16-bit grey; colour 8-bit, demosa
 pixels are stretched to white frame by frame, so a dim frame is still visible but brightness cannot be compared
 between PNGs. The .raw is what the camera measured: 16-bit little-endian 10-bit values, row by row, no header.
 
-Record saves every frame until it is pressed again, as lossless .j2ks: compressed on the Jetson's GPU, or on the CPU
-where there is none (the Pi), which keeps up with less. An .mp4 of the live view, to watch, is made beside it right
-after (see recording.py). The status line counts the frames lost.
+Record saves every frame until it is pressed again, as lossless .j2ks. The Jetson's GPU compresses the frames as they
+come. Where there is no GPU (the Pi) every frame is first stored raw and compressed in the background, which goes on
+after Stop: the status line counts the frames still waiting, and closing the window waits for them. An .mp4 of the
+live view, to watch, is made beside the recording right after Stop (see recording.py). The status line also counts
+the frames lost, and recording stops by itself when the disk is nearly full.
 
 Picking a size or frame rate restarts that camera. Close the window or press Ctrl+C to stop.
 Run: uv run python camera_ui.py   (Jetson: .venv/bin/python camera_ui.py)
 """
 from pathlib import Path
+import shutil
 import signal
 import subprocess
 import threading
@@ -30,6 +33,7 @@ import dual_stream
 import recording
 
 CAPTURES = Path.home() / "Desktop" / "PATH-captures"
+LEAST_FREE = 10e9  # Recording stops by itself when the disk has fewer bytes free than this
 POWER_HINT = ""  # Added to the dropped-frames message when the Jetson is not in its fastest power mode
 if shared.IS_JETSON:
     power_mode = subprocess.run(["nvpmodel", "-q"], capture_output=True, text=True).stdout
@@ -38,7 +42,7 @@ if shared.IS_JETSON:
 
 cams = {}  # By camera name: the cameras that are streaming, each the cam that dual_stream.start() returned
 columns = {}  # By camera name: its widgets, see add_column()
-making = {}  # After Record stops, until its .mp4s are made: "text" (the status line) and "recorders"
+making = {}  # After Record stops, until its frames are compressed and its .mp4s made: see stop_recording()
 
 window = Gtk.Window(title="PATH Imaging cameras")
 window.set_default_size(1400, 640)
@@ -231,13 +235,34 @@ def stop_recording():  # Also at exit. Does nothing when not recording
     for cam in cams.values():  # First tell the cameras to stop handing over frames, then close the files
         cam["recorder"] = None
     for recorder in recorders:
-        recorder.close()  # Writes the frames still waiting and closes the file; the .mp4 follows
+        recorder.close()  # GPU: writes the frames still waiting. Without one they are compressed in the background
     if recorders:
-        text = recording_text(recorders)
-        folder = recorders[0].path.parent.name
-        making["text"] = f"Recorded {text}  ·  {CAPTURES}/*/{folder}/"
         making["recorders"] = recorders
-        status.set_text(making["text"] + "  ·  making the .mp4s ...")
+        making["seconds"] = time.time() - recorders[0].started  # How long it recorded
+        making["folder"] = recorders[0].path.parent.name
+        making["note"] = ""  # Why it stopped, if not by the button
+        show_recorded()
+
+
+def show_recorded():  # The status line after Stop: once a second until the frames are compressed and the .mp4s made
+    recorders = making["recorders"]
+    folder = making["folder"]
+    text = "Recorded " + recording_text(recorders, making["seconds"]) + f"  ·  {CAPTURES}/*/{folder}/" + making["note"]
+    waiting = frames_waiting(recorders)
+    if waiting and still_compressing(recorders):
+        status.set_text(text + f"  ·  compressing, {waiting} frames left")
+    elif waiting:  # Compressing ended early; the reason is in the text
+        status.set_text(text + f"  ·  {waiting} frames not compressed: python recording.py FILE.j2ks --finish")
+        making.clear()
+    elif not mp4s_made(recorders):
+        status.set_text(text + "  ·  making the .mp4s ...")
+    else:
+        error = mp4_error(recorders)
+        if error:
+            status.set_text(text + "  ·  " + error)
+        else:
+            status.set_text(text + "  ·  .mp4s ready")
+        making.clear()
 
 
 def active_recorders():  # One per camera while recording, otherwise none
@@ -246,6 +271,20 @@ def active_recorders():  # One per camera while recording, otherwise none
         if cam["recorder"] is not None:
             recorders.append(cam["recorder"])
     return recorders
+
+
+def frames_waiting(recorders):  # Without a GPU: frames stored on disk that are not compressed yet
+    waiting = 0
+    for recorder in recorders:
+        waiting += recorder.waiting_frames
+    return waiting
+
+
+def still_compressing(recorders):  # True until every recorder's background compressing has ended
+    for recorder in recorders:
+        if not recorder.done.is_set():
+            return True
+    return False
 
 
 def mp4s_made(recorders):  # True once every recorder's .mp4 is finished
@@ -262,9 +301,8 @@ def mp4_error(recorders):  # Why a recording has no .mp4 (its tools are missing,
     return None
 
 
-def recording_text(recorders):
-    """For the status line: 12 s  ·  TEVS-AR0822-M 720 frames, IMX412C 240 frames  ·  2.41 GB  ·  none lost"""
-    seconds = time.time() - recorders[0].started
+def recording_text(recorders, seconds):
+    """For the status line: 12 s  ·  TEVS-AR0822-M 720 frames, IMX412C 240 frames (180 waiting)  ·  2.41 GB  ·  none lost"""
     frames = []
     errors = []
     dropped = 0
@@ -272,7 +310,12 @@ def recording_text(recorders):
     total_bytes = 0
     for recorder in recorders:
         sensor = recorder.path.parent.parent.name  # The file is in <sensor>/<time>/
-        frames.append(f"{sensor} {recorder.written} frames")
+        waiting = recorder.waiting_frames  # Without a GPU: stored on disk, not compressed yet
+        count = recorder.written + waiting
+        if waiting:
+            frames.append(f"{sensor} {count} frames ({waiting} waiting)")
+        else:
+            frames.append(f"{sensor} {count} frames")
         dropped += recorder.dropped
         skipped += recorder.skipped
         total_bytes += recorder.bytes
@@ -280,7 +323,8 @@ def recording_text(recorders):
             errors.append(recorder.error)
     lost = []
     if dropped:
-        lost.append(f"{dropped} DROPPED: the encoder fell behind{POWER_HINT}")
+        behind = recorders[0].behind  # "the encoder", or "the disk" where frames are stored first
+        lost.append(f"{dropped} DROPPED: {behind} fell behind{POWER_HINT}")
     if skipped:
         lost.append(f"{skipped} skipped by a camera")
     if not lost:
@@ -298,17 +342,23 @@ def update_info():  # Once a second: the measured frame rates, and the recording
         columns[name]["info"].set_text(f"{width} x {height}  ·  RAW10  ·  {fps:.1f} fps")
     recorders = active_recorders()
     if recorders:
-        status.set_text("Recording " + recording_text(recorders))
-    elif making and mp4s_made(making["recorders"]):
-        error = mp4_error(making["recorders"])
-        if error:
-            status.set_text(making["text"] + "  ·  " + error)
-        else:
-            status.set_text(making["text"] + "  ·  .mp4s ready")
-        making.clear()
+        seconds = time.time() - recorders[0].started
+        free = shutil.disk_usage(CAPTURES).free
+        free_gb = free / 1e9
+        status.set_text("Recording " + recording_text(recorders, seconds) + f"  ·  {free_gb:.0f} GB free")
+        if free < LEAST_FREE:
+            record_button.set_active(False)  # As if Record was pressed again, see toggle_record()
+            if making:
+                making["note"] = "  ·  STOPPED: the disk is almost full"
+                show_recorded()
+    elif making:
+        show_recorded()
     return True  # Keep being called
 
 
+for unfinished in recording.unfinished(CAPTURES):  # Recordings whose frames an earlier run did not finish compressing
+    if recording.finish(unfinished) is not None:
+        print(f"finishing {unfinished} in the background")
 for camera_name in CAMERAS:
     add_column(camera_name)
 capture_button.connect("clicked", capture)
@@ -326,3 +376,5 @@ Gtk.main()
 stop_recording()  # Before the cameras close, so both recordings end at the same moment
 for cam in cams.values():
     dual_stream.close(cam)
+signal.signal(signal.SIGINT, signal.default_int_handler)  # The window is gone: Ctrl+C is Python's again
+recording.wait_until_compressed()  # Without a GPU frames may still wait: stays until they are in, or Ctrl+C

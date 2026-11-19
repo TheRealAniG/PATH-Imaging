@@ -1,9 +1,13 @@
 """Lossless RAW10 video: recorded by camera_ui.py's Record button, read back here.
 
 Each frame is compressed on its own with lossless JPEG 2000 (High-Throughput), so what comes back is bit for bit what
-the camera delivered. On a Jetson the GPU compresses (NVIDIA nvJPEG2000). Anywhere else, the Raspberry Pi included,
-the CPU does (OpenJPH, from the imagecodecs package): the same files, far slower, so a camera that sends more than
-the CPU can compress loses frames, which are counted. One file per camera, <name>.j2ks:
+the camera delivered. On a Jetson the GPU compresses, live (NVIDIA nvJPEG2000). Anywhere else, the Raspberry Pi
+included, the CPU does (OpenJPH, from the imagecodecs package): the same files, far slower than the cameras send. So
+there every frame is first stored raw in <name>.frames beside the recording (packed to 10 bits a pixel), and
+low-priority threads compress the stored frames into the .j2ks: while recording as far as storing leaves cores
+free, and after it with all of them, until none waits. Frames are then only lost when the disk cannot take them
+as fast as they come, which is counted.
+One file per camera, <name>.j2ks:
 
     line 1     "PATH RAW10 recording 1"
     line 2     JSON: camera, sensor, width, height, pattern, frame rate, exposure, gain, start time, ...
@@ -19,10 +23,14 @@ the recording right after it stops: lossy 8-bit H.264 of the pictures the live v
     python recording.py file.j2ks --check     also decodes every frame
     python recording.py file.j2ks --png 0     frame 0 as a 16-bit PNG beside it (colour demosaiced)
     python recording.py file.j2ks --mp4       replaces that .mp4 with one of every frame, at the live view's full size
+    python recording.py file.j2ks --finish    compresses the frames still waiting in file.frames (after a quit or power loss)
 """
 import collections
+import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor
+import fcntl
 import json
+import mmap
 import os
 from pathlib import Path
 import queue
@@ -38,7 +46,19 @@ MAGIC = b"PATH RAW10 recording 1\n"
 FRAME = struct.Struct("<dI")  # Capture time, length
 PLANES = ((0, 0), (0, 1), (1, 0), (1, 1))  # Row and column offset of each Bayer plane in the mosaic
 WAITING_BYTES = 60e6  # Memory for frames waiting for the encoder (at least 3 frames); beyond it frames are dropped
-CPU_THREADS = max(1, (os.cpu_count() or 4) - 1)  # Without a GPU each recording compresses this many frames at once
+WAITING_SHARE = 0.1  # Without a GPU frames wait in memory only for the disk: up to this share of the free memory,
+WAITING_MOST = 1e9  # and at most this many bytes, so a short stall of the disk loses nothing
+FRAMES = ".frames"  # Without a GPU: the folder beside a recording that holds its frames until they are compressed
+BLOCK = 4096  # A waiting frame goes straight to the disk, past the kernel's cache, which takes whole blocks of this many bytes
+LOW_BITS = 0x00C000C000C000C0  # Four pixels (value << 6) read as one 64-bit number: the 2 bits of each that pack_low() keeps
+GATHER = (1 << 50) + (1 << 36) + (1 << 22) + (1 << 8)  # Times this, those four pairs of bits land side by side in the top byte
+CPU_THREADS = max(1, (os.cpu_count() or 4) - 1)  # Without a GPU each recording compresses this many frames at once,
+RECORDING_THREADS = max(1, CPU_THREADS // 2)  # but only this many while anything records (with all, full-size colour skipped a tenth of its frames),
+BUSY_MOST = 0.5  # none while storing a frame takes more than this share of the time between two frames,
+HOLD = 10  # and none for this many seconds after a camera skipped a frame: the machine was too busy to take it
+COMPRESSING = set()  # The Backlogs that still have frames to compress
+STORING = set()  # Without a GPU: the Recorders that are recording right now
+STOP = threading.Event()  # Set to end all compressing early: the frames left stay on disk for --finish
 VIDEO_FPS = 15  # About how often the live view gets a picture (dual_stream.DISPLAY_FPS)
 VIDEO_WIDEST = 1024  # The .mp4 made of a recording is at most this wide
 ENCODE = ("videoconvert ! video/x-raw,format=I420 "  # Left alone, colour becomes 4:4:4, which players refuse
@@ -83,6 +103,236 @@ def _background(megapixels):
     frames. Then one that sends more than the CPU can compress (full-size colour) loses its own frames, not the
     other camera's. Linux gives each thread its own niceness."""
     os.setpriority(os.PRIO_PROCESS, threading.get_native_id(), min(19, 10 + round(megapixels / 2)))
+
+
+def _free_memory():  # Bytes of memory the kernel calls available, or None if it does not say
+    try:
+        for line in open("/proc/meminfo"):
+            if line.startswith("MemAvailable"):
+                return int(line.split()[1]) * 1024
+    except OSError:
+        pass
+    return None
+
+
+def _storing_busy():
+    """True while a recorder has frames piling up in memory, needs most of its time to store them, or just had its
+    camera skip a frame. Compressing then starts no new frame: capturing and storing go first, because a frame that
+    is not stored in time is lost, and one that is not compressed yet only waits."""
+    for recorder in list(STORING):
+        if recorder.waiting.qsize() > 2 or recorder.backlog.busy > BUSY_MOST or time.monotonic() < recorder.hold:
+            return True
+    return False
+
+
+def pack_high(frame, high):  # Of a frame (uint16, value << 6): the top 8 bits of every pixel, into high
+    both = frame.view(np.uint8).reshape(frame.shape[0], frame.shape[1], 2)  # Of every pixel: its low byte, then its high byte
+    high[:] = both[:, :, 1]
+
+
+def pack_low(frame, low, work):
+    """Of a frame (uint16, value << 6): the 2 bits below the top 8 of every pixel, into low, four pixels to a byte with
+    the first pixel in the lowest bits. Four pixels are handled as one 64-bit number, which is far faster than pixel
+    by pixel: so the width has to be a multiple of 4. work: room for those numbers, (height, width // 4) uint64."""
+    fours = frame.view(np.uint64)
+    np.bitwise_and(fours, LOW_BITS, out=work)
+    np.multiply(work, GATHER, out=work)
+    low[:] = work.view(np.uint8).reshape(work.shape[0], work.shape[1], 8)[:, :, 7]  # The top byte of each
+
+
+def unpack10(data, height, width):  # What pack_high and pack_low made (high, then low), back as (height, width) uint16 of the 10-bit values
+    high = np.frombuffer(data, np.uint8, height * width).reshape(height, width)
+    low = np.frombuffer(data, np.uint8, height * width // 4, height * width).reshape(height, width // 4)
+    values = high.astype(np.uint16)
+    values <<= 2
+    values[:, 0::4] |= low & 3
+    values[:, 1::4] |= (low >> 2) & 3
+    values[:, 2::4] |= (low >> 4) & 3
+    values[:, 3::4] |= low >> 6
+    return values
+
+
+def compress(values, mono):  # One frame of 10-bit values as the codestream the GPU would write (OpenJPH, on the CPU)
+    import imagecodecs
+    if mono:
+        return imagecodecs.htj2k_encode(values, bitspersample=10)
+    planes = np.empty((4, values.shape[0] // 2, values.shape[1] // 2), np.uint16)
+    for plane, (row, column) in zip(planes, PLANES):
+        plane[:] = values[row::2, column::2]
+    return imagecodecs.htj2k_encode(planes, planar=True, rgb=False, bitspersample=10)
+
+
+def compress_file(path, height, width, mono):  # In a pool thread: one waiting frame's file -> (capture time, codestream)
+    with open(path, "rb") as file:
+        stamp, length = FRAME.unpack(file.read(FRAME.size))
+        data = file.read(length)
+    values = unpack10(data, height, width)
+    return stamp, compress(values, mono)
+
+
+class Backlog:
+    """Without a GPU: the frames of one recording that wait on disk until they are compressed, each a file in
+    <name>.frames beside the .j2ks. store() puts a frame there, packed to 10 bits. run() compresses them into the
+    .j2ks on low-priority threads: oldest first, several at once, written in the order they were captured. It ends
+    once closed is set and no frame waits; then the folder is gone, complete is True and done is set.
+
+    Storing has to keep up with the camera, so it is made cheap. A frame's file is written straight to the disk, past
+    the kernel's cache: full-size colour is 370 MB a second, and copying that through the cache kept more than one
+    core busy (measured). And while one frame is on its way to the disk the next is already packed, into a second
+    buffer.
+
+    file: the .j2ks, open at its end. written: frames it already holds. files: frame files that already wait, oldest
+    first. counts: the object whose written, bytes and error are kept up to date (a Recorder; this one if None)."""
+    def __init__(self, path, file, height, width, mono, written, files, counts=None):
+        if width % 4:
+            raise ValueError(f"cannot pack a width of {width}: not a multiple of 4")
+        self.path = Path(path)
+        self.folder = self.path.with_suffix(FRAMES)
+        self.file = file
+        self.height = height
+        self.width = width
+        self.mono = mono
+        self.written = written
+        self.bytes = 0
+        self.error = None
+        if counts is None:
+            counts = self
+        self.counts = counts
+        self.files = collections.deque(files)  # Waiting frames: store() adds at the end, run() takes from the front
+        self.stored = written + len(files)  # Frames stored so far, compressed or not
+        self.number = 0  # The next frame file's number
+        if files:
+            self.number = int(files[-1].stem) + 1
+        used = FRAME.size + height * width * 5 // 4  # Bytes of one stored frame: capture time and length, high, low
+        self.buffers = []  # Two frames as their files hold them: "bytes" is all of it, "high" and "low" are the two parts of the frame in it
+        for _ in range(2):
+            buffer = mmap.mmap(-1, (used + BLOCK - 1) // BLOCK * BLOCK)  # Whole blocks; mmap's memory starts at a page, as writing past the cache needs
+            high = np.frombuffer(buffer, np.uint8, height * width, FRAME.size).reshape(height, width)
+            low = np.frombuffer(buffer, np.uint8, height * width // 4, FRAME.size + height * width).reshape(height, width // 4)
+            self.buffers.append({"bytes": buffer, "high": high, "low": low})
+        self.work = np.empty((height, width // 4), np.uint64)  # For pack_low()
+        self.writing = None  # The write of the frame stored last, on a helper thread
+        self.busy = 1.0  # The share of the time between two frames that store() takes, averaged over the last ones
+        self.newest = None  # Capture time of the frame stored last
+        self.closed = threading.Event()  # No more frames will be stored
+        self.done = threading.Event()  # run() has ended
+        self.complete = False  # Every frame is in the .j2ks
+        self.helpers = ThreadPoolExecutor(2)  # For store(): one packs half of a frame, one writes the frame before it
+        self.pool = ThreadPoolExecutor(CPU_THREADS, initializer=_background, initargs=[width * height / 1e6])  # For run()
+        self.folder.mkdir(parents=True, exist_ok=True)
+        COMPRESSING.add(self)
+
+    def left(self):  # Frames that still wait to be compressed
+        return self.stored - self.counts.written
+
+    def store(self, stamp, frame):  # One frame as the capture loop has it (value << 6) and its capture time, into its own file
+        began = time.monotonic()
+        frame = np.ascontiguousarray(frame)
+        buffer = self.buffers[self.number % 2]  # The other one may still be on its way to the disk
+        FRAME.pack_into(buffer["bytes"], 0, stamp, buffer["high"].nbytes + buffer["low"].nbytes)
+        lows = self.helpers.submit(pack_low, frame, buffer["low"], self.work)  # On a second core
+        pack_high(frame, buffer["high"])
+        lows.result()
+        self.flush()
+        self.writing = self.helpers.submit(self._write, buffer["bytes"], self.number)
+        self.number += 1
+        if self.newest is not None and stamp > self.newest:
+            share = (time.monotonic() - began) / (stamp - self.newest)
+            self.busy = 0.9 * self.busy + 0.1 * share
+        self.newest = stamp
+
+    def flush(self):  # Returns once the frame stored last is on disk; if writing it failed, raises why
+        writing = self.writing
+        self.writing = None
+        if writing is not None:
+            writing.result()
+
+    def _write(self, buffer, number):  # On a helper thread: one packed frame into its file
+        final = self.folder / f"{number:08d}.raw10"
+        part = final.with_suffix(".part")
+        try:
+            file = os.open(part, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_DIRECT, 0o644)  # O_DIRECT: past the kernel's cache
+        except OSError:
+            file = os.open(part, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)  # A disk that cannot do that: through the cache
+        try:
+            if os.write(file, buffer) != len(buffer):
+                raise OSError("the disk took only part of a frame")
+        finally:
+            os.close(file)
+        os.replace(part, final)  # Only a whole frame gets the final name
+        self.files.append(final)
+        self.stored += 1
+
+    def close(self):  # No more frames will be stored: run() ends once none waits
+        self.helpers.shutdown()  # Waits for the last frame's write
+        self.buffers.clear()  # Their memory is free again
+        self.closed.set()
+
+    def _forget(self, files):  # Their frames are in the .j2ks: once that is safely on disk, the files can go
+        os.fsync(self.file.fileno())
+        for path in files:
+            path.unlink()
+        files.clear()
+
+    def run(self):
+        pending = collections.deque()  # Frames being compressed, oldest first: (file, what the pool will return)
+        written_files = []  # Frame files whose frames were written to the .j2ks since the last _forget()
+        forgot_at = time.monotonic()
+        failed = False
+        while not failed and not STOP.is_set():
+            closed = self.closed.is_set()  # Read before looking for files: once it is set, none is added
+            limit = CPU_THREADS
+            if STORING:  # Something is recording
+                limit = RECORDING_THREADS
+            if self.files and len(pending) < limit and not _storing_busy():
+                path = self.files.popleft()
+                pending.append((path, self.pool.submit(compress_file, path, self.height, self.width, self.mono)))
+                continue
+            if not pending:
+                if closed and not self.files:
+                    break  # Nothing waits and nothing more will come
+                time.sleep(0.05)
+                continue
+            path, compressed = pending[0]
+            try:
+                stamp, data = compressed.result(timeout=0.05)  # The oldest first, so frames go in in the order they came
+            except concurrent.futures.TimeoutError:
+                continue  # Not ready yet: look for new frames meanwhile
+            except Exception as error:
+                self.counts.error = f"compressing stopped after {self.counts.written} frames: {error}"
+                failed = True
+                continue
+            pending.popleft()
+            try:
+                self.file.write(FRAME.pack(stamp, len(data)))
+                self.file.write(data)
+            except OSError as error:
+                self.counts.error = f"compressing stopped after {self.counts.written} frames: {error}"
+                failed = True
+                continue
+            self.counts.written += 1
+            self.counts.bytes += len(data)
+            written_files.append(path)
+            if time.monotonic() - forgot_at >= 1:
+                self._forget(written_files)
+                forgot_at = time.monotonic()
+        try:
+            self._forget(written_files)
+        except OSError as error:
+            self.counts.error = f"compressing stopped after {self.counts.written} frames: {error}"
+            failed = True
+        self.pool.shutdown(cancel_futures=True)  # Frames it had not begun stay on disk
+        if not failed and self.closed.is_set() and self.left() == 0:
+            self.complete = True
+            try:
+                self.folder.rmdir()
+            except OSError:
+                pass  # Something else is in it: leave it
+        self.file.close()  # Also gives up the lock on it
+        if self.counts is self and self.error:  # Finishing an old recording: nobody else reports it
+            print(f"{self.path.name}: {self.error}")
+        COMPRESSING.discard(self)
+        self.done.set()
 
 
 class Video:
@@ -181,18 +431,23 @@ def _recording(change):  # A recording starts (1) or ends (-1): .mp4s are only m
 class Recorder:
     def __init__(self, path, name, height, width, info, mono):
         """Record (height, width) frames of camera name to path; returns once the encoder is ready.
-        info: a dict kept in the file's header. mono: one plane, otherwise Bayer RGGB (the camera's MONO)."""
+        info: a dict kept in the file's header. mono: one plane, otherwise Bayer RGGB (the camera's MONO).
+        written counts the frames in the .j2ks, waiting_frames the ones stored but not compressed yet (no GPU);
+        done is set once every frame is in."""
         self.path, self.mono, self.gpu = Path(path), mono, encoder() == "gpu"
         self.written = self.dropped = self.bytes = 0
         self.error = None
         self.started = time.time()
         self.times = []  # Capture time of every frame offered, to count the ones the camera skipped
         self.buf = np.empty((height, width, 1) if mono else (4, height // 2, width // 2), np.uint16)  # GPU: the frame as the encoder takes it
-        self.waiting = queue.Queue(max(3, int(WAITING_BYTES // (width * height * 2))))
-        if self.gpu:
-            self.pool = ThreadPoolExecutor(4)  # Splits a colour frame into its planes: 6 ms on four threads, 13 ms on one
-        else:
-            self.pool = ThreadPoolExecutor(CPU_THREADS, initializer=_background, initargs=[width * height / 1e6])  # Each compresses whole frames
+        room = WAITING_BYTES
+        self.behind = "the encoder"  # What was too slow when a frame is dropped
+        if not self.gpu:
+            self.behind = "the disk"
+            free = _free_memory()
+            if free is not None:
+                room = max(WAITING_BYTES, min(WAITING_MOST, free * WAITING_SHARE))
+        self.waiting = queue.Queue(max(3, int(room // (width * height * 2))))
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.file = open(self.path, "wb", buffering=0)
         self.file.write(MAGIC + json.dumps({
@@ -203,11 +458,25 @@ class Recorder:
         self.video = Video(self.path.with_suffix(".mp4"), VIDEO_FPS, live=True)
         _recording(1)
         self.ready = threading.Event()
-        self.thread = threading.Thread(target=self._encode if self.gpu else self._encode_cpu)
-        self.thread.start()
+        if self.gpu:
+            self.pool = ThreadPoolExecutor(4)  # Splits a colour frame into its planes: 6 ms on four threads, 13 ms on one
+            self.done = threading.Event()
+            self.thread = threading.Thread(target=self._encode)
+            self.thread.start()
+        else:
+            fcntl.flock(self.file, fcntl.LOCK_EX)  # Held until the last frame is compressed, so finish() leaves it alone
+            self.backlog = Backlog(self.path, self.file, height, width, mono, 0, [], counts=self)
+            self.done = self.backlog.done
+            self.hold = 0.0  # Compressing starts no new frame before this time (time.monotonic()), see add()
+            STORING.add(self)
+            self.thread = threading.Thread(target=self._store)
+            self.thread.start()
+            threading.Thread(target=self._compress_stored).start()
         self.ready.wait()
 
     def add(self, frame, stamp):  # One frame as the capture loop has it (value << 6) and its capture time. Never waits
+        if not self.gpu and len(self.times) > 1 and stamp - self.times[-1] > 1.5 * (self.times[-1] - self.times[-2]):
+            self.hold = time.monotonic() + HOLD  # The camera skipped a frame: compressing gets out of the way for a while
         self.times.append(stamp)
         try:
             self.waiting.put_nowait((stamp, frame))
@@ -252,45 +521,54 @@ class Recorder:
             except Exception as error:
                 self.error = f"stopped after {self.written} frames: {error}"
 
-    def _compress(self, frame):  # CPU, in a pool thread: one frame as the codestream the GPU would write (OpenJPH)
-        import imagecodecs
-        if self.mono:
-            return imagecodecs.htj2k_encode(frame >> 6, bitspersample=10)
-        planes = np.empty((4, frame.shape[0] // 2, frame.shape[1] // 2), np.uint16)
-        for plane, (row, column) in zip(planes, PLANES):
-            np.right_shift(frame[row::2, column::2], 6, out=plane)
-        return imagecodecs.htj2k_encode(planes, planar=True, rgb=False, bitspersample=10)
-
-    def _encode_cpu(self):  # Encoder thread, CPU: frames are compressed several at once and written in the order they came
+    def _store(self):  # Writer thread, without a GPU: every frame from the queue onto the disk, see Backlog
+        taken = 0  # Frames taken from the queue
+        item = self.waiting.get()
         try:
-            self._compress(np.zeros((self.buf.shape[0], self.buf.shape[1]) if self.mono else (self.buf.shape[1] * 2, self.buf.shape[2] * 2), np.uint16))
+            while item is not None:
+                taken += 1
+                stamp, frame = item
+                self.backlog.store(stamp, frame)
+                item = self.waiting.get()
+            self.backlog.flush()  # The last frame is on disk too
+        except Exception as error:  # Mostly OSError: the disk is full, or gone
+            self.error = f"storing stopped after {self.backlog.stored} frames: {error}"
+        while item is not None:  # After a failure: keep emptying the queue so close() returns
+            item = self.waiting.get()
+            if item is not None:
+                taken += 1
+        self.dropped += taken - self.backlog.stored  # The frames that did not get onto the disk
+
+    def _compress_stored(self):  # Compressor thread, without a GPU: the stored frames into the .j2ks, until close() and none waits
+        try:
+            compress(np.zeros((64, 64), np.uint16), self.mono)  # The first one loads OpenJPH, which is slow: before recording
         except Exception as error:
             self.error = f"CPU encoder did not start: {error}"
         self.ready.set()
-        pending, item = collections.deque(), ()  # (capture time, frame being compressed), oldest first
-        while item is not None:
-            try:
-                item = self.waiting.get(timeout=0.05)
-            except queue.Empty:
-                item = ()
-            if item and not self.error:
-                pending.append((item[0], self.pool.submit(self._compress, item[1])))
-            while pending and (item is None or pending[0][1].done() or len(pending) >= CPU_THREADS):  # Full: wait for the oldest, and the queue fills
-                stamp, compressed = pending.popleft()
-                try:
-                    self._write(stamp, compressed.result())
-                except Exception as error:
-                    self.error = f"stopped after {self.written} frames: {error}"
+        self.backlog.run()
 
     @property
     def skipped(self):  # Frames the camera did not deliver while recording
         return missing(self.times)[0]
 
-    def close(self):  # Saves the frames still waiting and closes the file; the .mp4 follows (video.done)
+    @property
+    def waiting_frames(self):  # Without a GPU: frames stored on disk that are not compressed yet
+        if self.gpu:
+            return 0
+        return self.backlog.left()
+
+    def close(self):
+        """GPU: saves the frames still waiting and closes the file. Without one: returns once those frames are on disk;
+        compressing goes on and done is set when it ends. The .mp4 follows either way (video.done)."""
         self.waiting.put(None)
         self.thread.join()
-        self.pool.shutdown()
-        self.file.close()
+        if self.gpu:
+            self.pool.shutdown()
+            self.file.close()
+            self.done.set()
+        else:
+            STORING.discard(self)
+            self.backlog.close()  # Its run() ends once no frame waits, and closes the file
         _recording(-1)
         self.video.close()
 
@@ -337,6 +615,7 @@ class Recording:
         if self.file.readline() != MAGIC:
             raise ValueError(f"{path} is not a PATH RAW10 recording")
         self.info = json.loads(self.file.readline())
+        self.start = self.file.tell()  # Where the frames begin
         self.times, self.where, end = [], [], self.path.stat().st_size
         while len(head := self.file.read(FRAME.size)) == FRAME.size:
             stamp, length = FRAME.unpack(head)
@@ -371,6 +650,86 @@ class Recording:
         self.file.close()
 
 
+def unfinished(top):  # The recordings under top (a PATH-captures folder) that still have frames waiting: their .j2ks files
+    found = []
+    for folder in sorted(Path(top).glob("*/*/*" + FRAMES)):
+        found.append(folder.with_suffix(SUFFIX))
+    return found
+
+
+def finish(path):
+    """Go on compressing a recording that still has frames waiting in its .frames folder: the program was closed, or
+    the power went, before it was done. The work runs in the background; returns its Backlog (see
+    wait_until_compressed()), or None if no frame waits or another program is at it."""
+    path = Path(path)
+    folder = path.with_suffix(FRAMES)
+    if not folder.is_dir():
+        return None
+    try:
+        file = open(path, "r+b", buffering=0)
+    except FileNotFoundError:
+        return None
+    try:
+        fcntl.flock(file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:  # Locked: another program is compressing it
+        file.close()
+        return None
+    recording = Recording(path)  # The header, and the frames that are whole
+    info = recording.info
+    written = len(recording)
+    end = recording.start
+    newest = None  # Capture time of the last frame in the .j2ks
+    if written:
+        offset, length = recording.where[-1]
+        end = offset + length
+        newest = float(recording.times[-1])
+    recording.close()
+    file.truncate(end)  # Cuts off a frame that was only half written
+    file.seek(end)
+    for part in folder.glob("*.part"):
+        part.unlink()
+    whole = FRAME.size + info["height"] * info["width"] * 5 // 4  # Bytes of one stored frame; its file is as long or a little longer
+    files = []
+    for frame_file in sorted(folder.glob("*.raw10")):
+        keep = frame_file.stat().st_size >= whole  # Shorter: the power went while it was written
+        if keep and newest is not None:
+            with open(frame_file, "rb") as head:
+                stamp, length = FRAME.unpack(head.read(FRAME.size))
+            keep = stamp > newest  # Otherwise it is in the .j2ks already
+        if keep:
+            files.append(frame_file)
+        else:
+            frame_file.unlink()
+    backlog = Backlog(path, file, info["height"], info["width"], info["pattern"] == "mono", written, files)
+    backlog.close()
+    threading.Thread(target=backlog.run).start()
+    return backlog
+
+
+def wait_until_compressed():
+    """Wait until the frames of every recording that still wait are compressed, printing how many are left. Ctrl+C
+    stops the compressing: the frames left stay on disk, and the commands that finish them are printed."""
+    jobs = list(COMPRESSING)
+    ending = "done"
+    try:
+        while COMPRESSING:
+            left = 0
+            for job in list(COMPRESSING):
+                left += job.left()
+            print(f"\rcompressing: {left} frames left   ", end="", flush=True)
+            time.sleep(1)
+    except KeyboardInterrupt:
+        ending = "stopped"
+        STOP.set()
+        while COMPRESSING:  # Each stops after the frames it is working on
+            time.sleep(0.1)
+    if jobs:
+        print(f"\rcompressing: {ending}" + " " * 20)
+    for job in jobs:
+        if not job.complete:
+            print(f"{job.left()} frames still wait: python recording.py '{job.path}' --finish")
+
+
 def to_mp4(rec, out):  # A copy to watch: every frame as the live view shows it, at its capture time
     from cameras import CAMERAS
     preview, step = CAMERAS[rec.info["camera"]].preview, max(1, rec.info["width"] // (1280 if rec.info["pattern"] == "mono" else 2000))  # Colour halves again: 4032 wide becomes 1008
@@ -385,6 +744,13 @@ def to_mp4(rec, out):  # A copy to watch: every frame as the live view shows it,
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         sys.exit(__doc__)
+    waiting = len(list(Path(sys.argv[1]).with_suffix(FRAMES).glob("*.raw10")))
+    if "--finish" in sys.argv:
+        if finish(sys.argv[1]) is None and waiting:
+            print("another program is compressing this recording")
+        wait_until_compressed()
+    elif waiting:
+        print(f"{waiting} frames still wait to be compressed: python recording.py '{sys.argv[1]}' --finish")
     rec = Recording(sys.argv[1])
     print(*(f"{key}: {value}" for key, value in rec.info.items()), sep="\n")
     (gone, fps), size = rec.skipped(), rec.path.stat().st_size
